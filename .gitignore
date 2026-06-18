@@ -1,0 +1,22 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# Dependencies / build
+node_modules/
+dist/
+build/
+.vercel/
+
+# Local server data + generated output
+server/data/
+output/
+
+# OS / editor
+.DS_Store
+*.log
+
+# parent repo ignores all package.json — re-include ours (Railway needs them)
+!package.json
+!**/package.json

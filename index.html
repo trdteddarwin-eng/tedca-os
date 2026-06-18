@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tedca OS — Visual PRD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c0c0d; --bg2:#101012; --panel:#161618; --panel2:#1b1b1e;
+  --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.14);
+  --ink:#ECE9E2; --mut:rgba(236,233,226,.56); --mut2:rgba(236,233,226,.34);
+  --signal:#E63B2E; --signalsoft:rgba(230,59,46,.14);
+  --green:#34C759; --blue:#60a5fa; --purple:#c084fc; --amber:#fbbf24;
+  --serif:'Instrument Serif',Georgia,serif;
+  --body:'Inter',system-ui,sans-serif;
+  --mono:'Space Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased;line-height:1.55;
+  background-image:radial-gradient(900px 500px at 80% -5%,rgba(230,59,46,.10),transparent 60%),
+    linear-gradient(to right,rgba(255,255,255,.018) 1px,transparent 1px),
+    linear-gradient(to bottom,rgba(255,255,255,.018) 1px,transparent 1px);
+  background-size:auto,46px 46px,46px 46px;}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.serif{font-family:var(--serif);font-weight:400;letter-spacing:-.015em;line-height:1.04}
+.i{font-style:italic;color:var(--signal)}
+.eyebrow{font-family:var(--mono);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.22em;color:var(--mut2)}
+.eyebrow.sig{color:var(--signal)}
+
+/* nav */
+nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px) saturate(1.3);background:rgba(12,12,13,.72);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:18px;height:60px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:-.04em;font-size:17px}
+.dot{width:26px;height:26px;border-radius:8px;background:var(--signal);display:grid;place-items:center}
+.dot i{width:5px;height:5px;border-radius:50%;background:#fff;display:block}
+.navlinks{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.navlinks a{font-size:12.5px;color:var(--mut);padding:7px 11px;border-radius:7px;transition:.2s}
+.navlinks a:hover,.navlinks a.on{color:var(--ink);background:rgba(255,255,255,.06)}
+.host{font-family:var(--mono);font-size:11px;color:var(--green);display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:999px}
+.host .lv{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(52,199,89,.6);animation:ping 1.8s infinite}
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(52,199,89,.5)}70%{box-shadow:0 0 0 7px rgba(52,199,89,0)}100%{box-shadow:0 0 0 0 rgba(52,199,89,0)}}
+
+section{padding:74px 0;border-bottom:1px solid var(--line)}
+.sec-head{margin-bottom:34px}
+.sec-head h2{margin:8px 0 0;font-size:clamp(2rem,4.4vw,3.2rem)}
+.sec-head p{color:var(--mut);max-width:60ch;margin:14px 0 0;font-size:15.5px}
+
+/* hero */
+.hero{padding:80px 0 70px;border-bottom:1px solid var(--line)}
+.hero h1{font-size:clamp(3rem,8vw,6.2rem);margin:18px 0 0}
+.hero .lede{color:var(--mut);font-size:clamp(1.05rem,2vw,1.35rem);max-width:62ch;margin:22px 0 0}
+.hero .lede b{color:var(--ink);font-weight:600}
+.rule{margin-top:30px;display:inline-flex;gap:12px;align-items:center;padding:13px 18px;border:1px solid var(--line2);border-radius:12px;background:var(--panel);font-size:14px}
+.rule b{color:var(--signal)}
+.stats{display:flex;flex-wrap:wrap;gap:30px;margin-top:40px}
+.stat .n{font-family:var(--serif);font-size:2.6rem;line-height:1}
+.stat .l{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut2);margin-top:4px}
+
+/* generic panel */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px}
+.grid{display:grid;gap:16px}
+
+/* architecture */
+.arch{display:flex;flex-direction:column;gap:0;align-items:center}
+.layer{width:100%;max-width:760px;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line2);border-radius:16px;padding:20px 24px;position:relative}
+.layer .tag{position:absolute;top:-10px;left:18px;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;padding:3px 9px;border-radius:999px;background:var(--bg);border:1px solid var(--line2);color:var(--mut)}
+.layer h4{margin:6px 0 4px;font-size:16px;letter-spacing:-.01em}
+.layer p{margin:0;color:var(--mut);font-size:13px}
+.layer.signal{border-color:rgba(230,59,46,.5);box-shadow:0 0 40px -16px rgba(230,59,46,.5)}
+.layer.signal .tag{color:var(--signal);border-color:rgba(230,59,46,.5)}
+.cxn{width:2px;height:30px;background:linear-gradient(var(--line2),transparent);position:relative;overflow:hidden}
+.cxn::after{content:'';position:absolute;left:50%;top:-8px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--signal);animation:fall 1.6s linear infinite}
+@keyframes fall{0%{top:-8px;opacity:0}20%{opacity:1}100%{top:30px;opacity:0}}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px;width:100%;max-width:760px}
+@media(max-width:640px){.split{grid-template-columns:1fr}}
+
+/* pipeline */
+.pipe-tools{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.btn{font-family:var(--body);font-weight:600;font-size:14px;border:none;border-radius:10px;padding:12px 18px;cursor:pointer;display:inline-flex;gap:8px;align-items:center;transition:.2s}
+.btn-go{background:var(--signal);color:#fff}
+.btn-go:hover{background:#c2271b;transform:translateY(-1px)}
+.btn-go:disabled{opacity:.5;cursor:default;transform:none}
+.steps{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+@media(max-width:760px){.steps{grid-template-columns:1fr 1fr}}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;position:relative;transition:.4s;min-height:128px}
+.step .num{font-family:var(--mono);font-size:10px;color:var(--mut2)}
+.step h5{margin:9px 0 6px;font-size:13.5px;letter-spacing:-.01em}
+.step p{margin:0;font-size:11.5px;color:var(--mut)}
+.step .api{margin-top:10px;display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--signal);background:var(--signalsoft);padding:3px 7px;border-radius:6px}
+.step.act{border-color:var(--signal);box-shadow:0 0 26px -10px rgba(230,59,46,.7);transform:translateY(-3px)}
+.step.done{border-color:rgba(52,199,89,.4)}
+.step.done .num{color:var(--green)}
+/* live log */
+.log{margin-top:18px;background:#060607;border:1px solid var(--line);border-radius:13px;font-family:var(--mono);font-size:12px;padding:16px 18px;min-height:150px;max-height:230px;overflow:auto}
+.log .ln{display:flex;gap:10px;padding:2px 0;opacity:0;transform:translateX(-8px);animation:in .3s forwards}
+@keyframes in{to{opacity:1;transform:none}}
+.log .t{color:var(--mut2);flex-shrink:0;width:46px}
+.log .ag{flex-shrink:0;width:78px;font-weight:700;text-transform:uppercase;font-size:10.5px}
+.ag.research{color:var(--blue)}.ag.writer{color:var(--purple)}.ag.scrape{color:var(--amber)}.ag.send{color:var(--green)}.ag.sys{color:var(--mut2)}
+.log .m{color:var(--mut)}
+.cur{display:inline-block;width:7px;height:14px;background:var(--signal);margin-left:3px;vertical-align:-2px;animation:bl .8s step-end infinite}
+@keyframes bl{50%{opacity:0}}
+
+/* replies */
+.branches{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:760px){.branches{grid-template-columns:1fr}}
+.branch{border-radius:15px;padding:20px;border:1px solid var(--line)}
+.branch .h{display:flex;align-items:center;gap:9px;font-weight:700;font-size:14px;margin-bottom:6px}
+.branch .pill{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.08em}
+.branch p{margin:8px 0 0;font-size:12.5px;color:var(--mut)}
+.b-good{background:linear-gradient(180deg,rgba(52,199,89,.07),transparent);border-color:rgba(52,199,89,.32)}
+.b-good .pill{background:rgba(52,199,89,.15);color:var(--green)}
+.b-warn{background:linear-gradient(180deg,rgba(251,191,36,.07),transparent);border-color:rgba(251,191,36,.32)}
+.b-warn .pill{background:rgba(251,191,36,.15);color:var(--amber)}
+.b-bad{background:linear-gradient(180deg,rgba(230,59,46,.07),transparent);border-color:rgba(230,59,46,.34)}
+.b-bad .pill{background:var(--signalsoft);color:var(--signal)}
+
+/* api cards */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:760px){.cards{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.cards{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:17px;transition:.25s}
+.card:hover{border-color:var(--line2);transform:translateY(-2px)}
+.card .nm{font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.card .nm .badge{font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:3px 7px;border-radius:6px}
+.badge.cloud{background:rgba(96,165,250,.14);color:var(--blue)}
+.badge.local{background:rgba(192,132,252,.14);color:var(--purple)}
+.badge.pay{background:var(--signalsoft);color:var(--signal)}
+.badge.free{background:rgba(52,199,89,.14);color:var(--green)}
+.card p{margin:9px 0 0;font-size:12px;color:var(--mut)}
+
+/* module + control grids */
+.mods{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:760px){.mods{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.mods{grid-template-columns:1fr}}
+.mod{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+.mod .ic{width:34px;height:34px;border-radius:9px;background:var(--signalsoft);color:var(--signal);display:grid;place-items:center;font-size:17px;margin-bottom:11px}
+.mod h5{margin:0 0 5px;font-size:14px}
+.mod p{margin:0;font-size:12px;color:var(--mut)}
+
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:760px){.trio{grid-template-columns:1fr}}
+
+/* content engine */
+.tracks{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:760px){.tracks{grid-template-columns:1fr}}
+.track{border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--panel)}
+.track .top{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.track h4{margin:0;font-size:17px}
+.chip{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;padding:3px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--mut)}
+.track ul{margin:14px 0 0;padding:0;list-style:none}
+.track li{font-size:13px;color:var(--mut);padding:7px 0 7px 22px;position:relative;border-top:1px solid var(--line)}
+.track li:first-of-type{border-top:none}
+.track li::before{content:'';position:absolute;left:4px;top:14px;width:6px;height:6px;border-radius:50%;background:var(--signal)}
+.track li b{color:var(--ink);font-weight:600}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.fp{font-family:var(--mono);font-size:11px;padding:7px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--bg2);color:var(--mut)}
+.fp.sig{color:var(--signal);border-color:rgba(230,59,46,.4);background:var(--signalsoft);font-weight:700}
+.fa{color:var(--mut2);font-size:13px}
+.cd{font-family:var(--mono);font-size:11px;color:var(--amber)}
+.split2{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+@media(max-width:680px){.split2{grid-template-columns:1fr}}
+.mini{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--bg2)}
+.mini p{margin:7px 0 0;font-size:12px;color:var(--mut)}
+
+/* phasing */
+.phase{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:760px){.phase{grid-template-columns:1fr}}
+.ph{border-radius:15px;padding:20px;border:1px solid var(--line);background:var(--panel)}
+.ph.v1{border-color:rgba(230,59,46,.45);box-shadow:0 0 38px -16px rgba(230,59,46,.55)}
+.ph .v{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.14em;color:var(--signal)}
+.ph h5{margin:8px 0 10px;font-size:16px}
+.ph li{font-size:12.5px;color:var(--mut);list-style:none;padding:4px 0 4px 18px;position:relative}
+.ph li::before{content:'→';position:absolute;left:0;color:var(--mut2)}
+.ph .when{margin-top:12px;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut2)}
+
+footer{padding:50px 0;color:var(--mut2);font-size:13px;text-align:center}
+.note{font-family:var(--mono);font-size:11px;color:var(--amber);background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:10px;padding:12px 15px;margin-top:18px}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand"><span class="dot"><i></i></span>tedca&nbsp;OS</div>
+    <div class="navlinks">
+      <a href="#overview">Overview</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#brain">Brain</a>
+      <a href="#email">Email Engine</a>
+      <a href="#replies">Replies</a>
+      <a href="#apis">APIs</a>
+      <a href="#modules">Modules</a>
+      <a href="#control">Control</a>
+      <a href="#content">Content</a>
+      <a href="#phasing">Phasing</a>
+    </div>
+    <span class="host"><span class="lv"></span> localhost</span>
+  </div>
+</nav>
+
+<!-- HERO -->
+<header class="hero" id="overview">
+  <div class="wrap">
+    <span class="eyebrow sig">Product Requirements · V1</span>
+    <h1 class="serif">Your business,<br>run from <span class="i">one screen.</span></h1>
+    <p class="lede">A private, password-gated <b>mission control</b> — live on your phone, running in the cloud even when your Mac is off. Click one button each morning and your cold-email machine runs end to end. You watch it live. Replies get handled. The agent pings you when it needs you.</p>
+    <div class="rule">⚑ The hard rule:&nbsp; <b>no button exists unless it actually works.</b></div>
+    <div class="stats">
+      <div class="stat"><div class="n serif">1</div><div class="l">Click each morning</div></div>
+      <div class="stat"><div class="n serif">5+</div><div class="l">Inboxes, rotated safely</div></div>
+      <div class="stat"><div class="n serif">24/7</div><div class="l">Cloud, on your phone</div></div>
+      <div class="stat"><div class="n serif">$0</div><div class="l">Instantly reply tier</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">How it's wired</span>
+      <h2 class="serif">The <span class="i">architecture</span></h2>
+      <p>One cloud brain you reach from anywhere, plus a local worker on your Mac for anything that needs your files or Python. Both stream into the same live feed — so you see everything, wherever it runs.</p>
+    </div>
+    <div class="arch">
+      <div class="layer"><span class="tag">You</span><h4>📱 Phone&nbsp;+&nbsp;💻 Laptop</h4><p>Same dashboard everywhere. Click a button, watch your agents work in real time.</p></div>
+      <div class="cxn"></div>
+      <div class="layer signal"><span class="tag">Cloud · Railway</span><h4>Tedca OS — web app + Postgres + live WebSocket feed</h4><p>Always on. Hosts the dashboard, the database, and every agent that must run without your computer.</p></div>
+      <div class="cxn"></div>
+      <div class="split">
+        <div class="layer"><span class="tag" style="color:var(--blue);border-color:rgba(96,165,250,.5)">Cloud agents · 24/7</span><h4>Send · Replies · Follow-ups</h4><p>Cold-email sending, reply handling, follow-ups, Telegram approvals — alive while your Mac sleeps.</p></div>
+        <div class="layer"><span class="tag" style="color:var(--purple);border-color:rgba(192,132,252,.5)">Local worker · your Mac</span><h4>Files · Python · Obsidian</h4><p>Apify scrapes, Obsidian sync, Live-Photo render. Streams its activity up to the same cloud feed.</p></div>
+      </div>
+      <div class="cxn"></div>
+      <div class="layer"><span class="tag">Integrations</span><h4>Gmail API · Apify · AnyMailFinder · OpenRouter · Telegram · Obsidian · Warmup tool</h4><p>Real connections, not mockups. Each one does a real job in the pipeline below.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- BRAIN -->
+<section id="brain">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow sig">The source of truth</span>
+      <h2 class="serif">Powered by <span class="i">Obsidian</span></h2>
+      <p>Ask the agent anything and it answers from your vault — not guesses. Your Obsidian brain holds the ICP, the niche you're targeting (<b style="color:var(--ink)">med spas + service businesses, swappable</b>), your email angles, playbooks, and what's worked. Every decision is grounded there.</p>
+    </div>
+    <div class="trio">
+      <div class="panel">
+        <div class="eyebrow sig">Reads first</div>
+        <h4 class="serif" style="font-size:1.5rem;margin:10px 0 8px">Thinks with your vault</h4>
+        <p style="color:var(--mut);font-size:13px;margin:0">Ask a question or launch a run → it pulls the right notes (ICP, target niche, templates) and acts on them. The right info, at the right time.</p>
+      </div>
+      <div class="panel">
+        <div class="eyebrow sig">Writes back</div>
+        <h4 class="serif" style="font-size:1.5rem;margin:10px 0 8px">Saves what it learns</h4>
+        <p style="color:var(--mut);font-size:13px;margin:0">Every lead + a daily summary written back into the vault, so your second brain stays the single source of truth you can actually read.</p>
+      </div>
+      <div class="panel">
+        <div class="eyebrow sig">Best of both</div>
+        <h4 class="serif" style="font-size:1.5rem;margin:10px 0 8px">Knowledge vs. queue</h4>
+        <p style="color:var(--mut);font-size:13px;margin:0">Obsidian = the brain it reasons over. Postgres = the fast lead bank for dedup + status. Mirrored, so nothing is ever lost.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- EMAIL ENGINE -->
+<section id="email">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow sig">V1 · The money machine</span>
+      <h2 class="serif">The morning <span class="i">cold-email engine</span></h2>
+      <p>One button. Five steps. Press play to watch how a run will actually move — each step lights up and reports to the live feed, exactly like it will in the real OS.</p>
+    </div>
+    <div class="pipe-tools">
+      <button class="btn btn-go" id="runBtn">▶ Simulate a run</button>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--mut2)">demo only — shows the flow & APIs each step uses</span>
+    </div>
+    <div class="steps" id="steps">
+      <div class="step" data-i="0"><div class="num">01</div><h5>Target + Brief</h5><p>Asks how many leads, pulls the ICP + angle from your vault.</p><span class="api">Obsidian + LLM</span></div>
+      <div class="step" data-i="1"><div class="num">02</div><h5>Bank or Scrape</h5><p>Reuses yesterday's leftovers first; one Apify run only if low.</p><span class="api">Apify</span></div>
+      <div class="step" data-i="2"><div class="num">03</div><h5>Find CEO + Verify</h5><p>Exact CEO email, verified. Keeps valid, skips risky.</p><span class="api">AnyMailFinder</span></div>
+      <div class="step" data-i="3"><div class="num">04</div><h5>Save + Report</h5><p>Saves everything, hits your target, Telegrams a report.</p><span class="api">Postgres + Obsidian</span></div>
+      <div class="step" data-i="4"><div class="num">05</div><h5>Send + Bank Rest</h5><p>~100/day to verified only, 1 follow-up, leftovers saved.</p><span class="api">Gmail API</span></div>
+    </div>
+    <div class="log" id="log"><div class="ln"><span class="t">--:--</span><span class="ag sys">system</span><span class="m">idle — press “Simulate a run” to preview the pipeline<span class="cur"></span></span></div></div>
+    <div class="note">⚑ Safety baked in: per-inbox daily caps (~20–30, ramping) · rotation across all inboxes · randomized windows + jitter · auto-pause a cold inbox · start ~100/day, ramp slow.</div>
+    <div class="note" style="color:var(--green);background:rgba(52,199,89,.07);border-color:rgba(52,199,89,.28);margin-top:12px">$ Cost discipline: ONE Apify run per scrape (never N) · reuse yesterday's leftover leads before scraping new · verification is FREE via AnyMailFinder — send valid only, skip risky · NO paid enrichment, personalize from the scrape data you already have.</div>
+  </div>
+</section>
+
+<!-- REPLIES -->
+<section id="replies">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">When a lead writes back</span>
+      <h2 class="serif">Reply <span class="i">handling</span></h2>
+      <p>Reading replies runs free through the Gmail API — no $96 Instantly tier. Any reply stops follow-ups. What happens next depends on the message:</p>
+    </div>
+    <div class="branches">
+      <div class="branch b-good">
+        <div class="h"><span class="pill">Interested</span></div>
+        <p><b style="color:var(--ink)">Agent replies</b> with a tailored message + your <b style="color:var(--ink)">patient-engine link</b> — “a system already built for you.” Marks <b style="color:var(--ink)">Replied</b>, stops follow-ups, Telegrams you.</p>
+      </div>
+      <div class="branch b-warn">
+        <div class="h"><span class="pill">Negative</span></div>
+        <p>Not interested, but not unsubscribe. Agent <b style="color:var(--ink)">flags it + Telegrams you</b>, sends no link, stops follow-ups. You decide.</p>
+      </div>
+      <div class="branch b-bad">
+        <div class="h"><span class="pill">Unsubscribe</span></div>
+        <p>“Stop emailing me.” <b style="color:var(--ink)">Hard stop</b> — suppressed, marked Do-Not-Contact, never emailed again. No reply, no follow-up. No exceptions.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- APIS -->
+<section id="apis">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow sig">What's actually plugged in</span>
+      <h2 class="serif">The <span class="i">APIs</span> we'll use</h2>
+      <p>Every integration earns its place. Tags show where it runs and what it costs.</p>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="nm">Gmail API <span class="badge free">Free</span></div><p>Sends across your inboxes <i>and</i> reads replies for the auto-reply. Replaces the $96 Instantly tier.</p></div>
+      <div class="card"><div class="nm">Apify <span class="badge local">Local</span></div><p>Scrapes fresh leads per niche. Capped at $0.50/run per your guardrail.</p></div>
+      <div class="card"><div class="nm">AnyMailFinder <span class="badge cloud">Cloud</span></div><p>Finds + verifies emails, then enriches each lead.</p></div>
+      <div class="card"><div class="nm">OpenRouter <span class="badge pay">LLM</span></div><p>Writes scripts, classifies replies, drafts responses, powers self-healing.</p></div>
+      <div class="card"><div class="nm">Telegram <span class="badge cloud">Cloud</span></div><p>Approvals + alerts. Agent pauses and waits for your reply before continuing.</p></div>
+      <div class="card"><div class="nm">Obsidian / brain <span class="badge local">Local</span></div><p>Reads &amp; writes your second brain — projects, clients, daily notes.</p></div>
+      <div class="card"><div class="nm">Warmup tool <span class="badge pay">Sub</span></div><p>Keeps inboxes healthy so Google doesn't flag you. Your pick, plugs in.</p></div>
+      <div class="card"><div class="nm">Railway <span class="badge cloud">Host</span></div><p>Runs the web app, Postgres, and always-on cloud agents.</p></div>
+      <div class="card"><div class="nm">Modal <span class="badge cloud">Jobs</span></div><p>Scheduled + long-running jobs (daily Live Photos, follow-up sweeps).</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- MODULES -->
+<section id="modules">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">The dashboard</span>
+      <h2 class="serif">Ops <span class="i">modules</span></h2>
+      <p>What you see when you open it. Everything live, everything yours.</p>
+    </div>
+    <div class="mods">
+      <div class="mod"><div class="ic">◎</div><h5>Home / KPIs</h5><p>Leads, emails sent, replies, cost this month, what's running right now.</p></div>
+      <div class="mod"><div class="ic">☰</div><h5>Clients / CRM</h5><p>Auto-populated from scrapes. Live status: Scraped → Emailed → Follow-up → Replied.</p></div>
+      <div class="mod"><div class="ic">⟋</div><h5>Pipeline</h5><p>Every lead's stage at a glance, all the way to Call → Closed.</p></div>
+      <div class="mod"><div class="ic">◳</div><h5>Projects</h5><p>Your many builds, status + next step — reads &amp; writes brain/HOME.md.</p></div>
+      <div class="mod"><div class="ic">⚡</div><h5>Automation status</h5><p>Each agent: on/off, last run, result, cost.</p></div>
+      <div class="mod"><div class="ic">◈</div><h5>Second Brain</h5><p>Your Obsidian vault, in the OS. Edits write back with a confirm step.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTROL -->
+<section id="control">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow sig">Trust the agent, but verify</span>
+      <h2 class="serif">In the loop, <span class="i">self-healing,</span> on budget</h2>
+      <p>Three guarantees that make “let the agent run it” safe.</p>
+    </div>
+    <div class="trio">
+      <div class="panel">
+        <div class="eyebrow sig">Telegram HITL</div>
+        <h4 class="serif" style="font-size:1.5rem;margin:10px 0 8px">It waits for you</h4>
+        <p style="color:var(--mut);font-size:13px;margin:0">When an agent needs a decision, it Telegrams you and <b style="color:var(--ink)">freezes — polling until you reply</b> — then resumes exactly where it paused. Nothing moves without you.</p>
+      </div>
+      <div class="panel">
+        <div class="eyebrow sig">Self-healing</div>
+        <h4 class="serif" style="font-size:1.5rem;margin:10px 0 8px">It fixes itself</h4>
+        <p style="color:var(--mut);font-size:13px;margin:0">On failure: capture the error → OpenRouter diagnoses → <b style="color:var(--ink)">retry with a fix</b>. Still failing → stop, Telegram the reason, log to error-log.md. No silent failures.</p>
+      </div>
+      <div class="panel">
+        <div class="eyebrow sig">Cost tracking</div>
+        <h4 class="serif" style="font-size:1.5rem;margin:10px 0 8px">It counts the money</h4>
+        <p style="color:var(--mut);font-size:13px;margin:0">Every call logged with cost → per-run + a running <b style="color:var(--ink)">monthly total</b> on Home. Anything over <b style="color:var(--ink)">$0.50 asks first</b>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTENT -->
+<section id="content">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Phase 2</span>
+      <h2 class="serif">Content <span class="i">engine</span></h2>
+      <p>Lands once V1 is rock-solid. The agent <b style="color:var(--ink)">doesn't invent talking-head video</b> — it edits the avatar clips you generate, runs your Live-Photo directive, and pushes one piece of content to every channel.</p>
+    </div>
+    <!-- Agency track -->
+    <div class="track" style="margin-bottom:16px">
+      <div class="top"><h4 class="serif" style="font-size:1.5rem">Tedca agency</h4><span class="chip">IG · FB · TikTok · LinkedIn</span></div>
+      <p style="color:var(--mut);font-size:13px;margin:10px 0 0">Make <b style="color:var(--ink)">one piece, post everywhere.</b> Audience: people who <b style="color:var(--ink)">sell</b> — coaches, course &amp; community owners, promoters. Every post promotes your Claude skills + Claude Code and earns a keyword comment.</p>
+
+      <div class="eyebrow sig" style="margin:20px 0 10px">Your avatar-video pipeline</div>
+      <div class="flow">
+        <span class="fp">11Labs VO</span><span class="fa">→</span>
+        <span class="fp">HeyGen woman avatar</span><span class="fa">→</span>
+        <span class="fp">Claude Code edit · Tedca style</span><span class="fa">→</span>
+        <span class="fp">+ CTA at end</span><span class="fa">→</span>
+        <span class="fp sig">IG + FB</span>
+      </div>
+      <p style="color:var(--mut);font-size:12px;margin:10px 0 0">You hand the agent a video; it cuts, adds motion graphics + the CTA, following <code class="cd">directives/tedca_video_edit.md</code> + <code class="cd">tedca_mg_edit_and_livephoto.md</code>.</p>
+
+      <div class="split2">
+        <div class="mini"><div class="eyebrow sig">Comment → DM</div><p>A keyword comment fires your <b style="color:var(--ink)">ManyChat</b> auto-DM (already set up). Content is written to earn that comment.</p></div>
+        <div class="mini"><div class="eyebrow sig">LinkedIn · later</div><p>Business-owner angle — “how AI helps your business.” Slot reserved; you'll wire it when ready.</p></div>
+        <div class="mini"><div class="eyebrow sig">Website · later</div><p>Not built yet — reserved as the eventual destination these CTAs point to.</p></div>
+      </div>
+    </div>
+
+    <!-- Personal track -->
+    <div class="track">
+      <div class="top"><h4 class="serif" style="font-size:1.5rem">Personal brand</h4><span class="chip">TikTok only</span></div>
+      <ul>
+        <li><b>Live Photo series</b> — “Claude Code things you didn't know it could do,” caption 1 + caption 2, rendered from your <code class="cd">tiktok-livephoto</code> directive.</li>
+        <li><b>Claude Code tips</b> — the agent finds the topics, grounded in what you've actually built.</li>
+        <li><b>Local render + ping</b> — the agent renders it on your Mac, drops it in Photos, and Telegrams you it's ready with caption 1 + 2. You AirDrop to your phone and post manually.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- PHASING -->
+<section id="phasing" style="border-bottom:none">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow sig">The plan</span>
+      <h2 class="serif">What ships, <span class="i">in order</span></h2>
+      <p>V1 is small on purpose — so every single thing on screen actually works on day one.</p>
+    </div>
+    <div class="phase">
+      <div class="ph v1">
+        <div class="v">V1 — first</div>
+        <h5>Cold-Email Engine</h5>
+        <ul>
+          <li>One-click morning run</li>
+          <li>CRM auto-populates + live status</li>
+          <li>Reply handling (3 branches)</li>
+          <li>Live activity feed</li>
+          <li>Telegram approvals + cost tracking</li>
+        </ul>
+        <div class="when">Everything clickable works</div>
+      </div>
+      <div class="ph">
+        <div class="v" style="color:var(--mut2)">V2 — next</div>
+        <h5>Content Engine</h5>
+        <ul>
+          <li>Personal: Live Photos + topics</li>
+          <li>Agency: IG/FB/TikTok calendar</li>
+          <li>Runs on your locked styles</li>
+        </ul>
+        <div class="when">After V1 is solid</div>
+      </div>
+      <div class="ph">
+        <div class="v" style="color:var(--mut2)">V3 — later</div>
+        <h5>Expand</h5>
+        <ul>
+          <li>IG comment → DM automation</li>
+          <li>More content agents</li>
+          <li>Stripe + Cal.com</li>
+        </ul>
+        <div class="when">Once the engine hums</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Tedca OS — visual PRD · built locally · <span style="color:var(--mut)">click “Simulate a run” on the Email Engine to watch the flow</span>
+  </div>
+</footer>
+
+<script>
+// scrollspy
+const links=[...document.querySelectorAll('.navlinks a')];
+const secs=links.map(l=>document.querySelector(l.getAttribute('href')));
+const spy=()=>{let y=scrollY+90,cur=secs.length-1;for(let i=0;i<secs.length;i++){if(secs[i]&&secs[i].offsetTop>y){cur=i-1;break}}cur=Math.max(0,cur);links.forEach((l,i)=>l.classList.toggle('on',i===cur))};
+addEventListener('scroll',spy,{passive:true});spy();
+
+// pipeline simulation
+const runBtn=document.getElementById('runBtn'),log=document.getElementById('log'),steps=[...document.querySelectorAll('.step')];
+const script=[
+ [0,'sys','target set → 100 CEO leads · niche: med spas (from Obsidian ICP)',460],
+ [0,'research','reading brain/ → winning angle: “missed-call recovery”',520],
+ [1,'sys','lead bank: 38 leftover leads from yesterday — reusing first',440],
+ [1,'scrape','bank low → ONE Apify run… 60 businesses + domains found',660],
+ [2,'scrape','AnyMailFinder → exact CEO + verify… 84 valid (14 risky skipped)',680],
+ [2,'sys','verified-only · no paid enrichment · personalize from scrape data',460],
+ [3,'sys','saved 84 → Postgres + brain/ · target hit ✓ Telegram report sent',470],
+ [4,'send','rotating 5 inboxes · sending 100 verified · jitter 9–14s…',560],
+ [4,'send','sent 100 · +1 follow-up each · 22 leftovers banked for tomorrow',520],
+ [4,'sys','run complete · est. cost $0.38 · report sent ✓',360],
+];
+const t=()=>{const d=new Date();return String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0')};
+let running=false;
+function line(ag,m){const el=document.createElement('div');el.className='ln';el.innerHTML='<span class="t">'+t()+'</span><span class="ag '+ag+'">'+ag+'</span><span class="m">'+m+'</span>';log.appendChild(el);log.scrollTop=log.scrollHeight}
+async function run(){
+  if(running)return;running=true;runBtn.disabled=true;runBtn.textContent='● running…';
+  log.innerHTML='';steps.forEach(s=>s.classList.remove('act','done'));
+  let last=-1;
+  for(const [i,ag,msg,ms] of script){
+    if(i!==last){steps.forEach((s,k)=>{s.classList.toggle('act',k===i);if(k<i)s.classList.add('done')});last=i}
+    line(ag,msg);
+    await new Promise(r=>setTimeout(r,ms));
+  }
+  steps.forEach(s=>{s.classList.remove('act');s.classList.add('done')});
+  const el=document.createElement('div');el.className='ln';el.innerHTML='<span class="t">'+t()+'</span><span class="ag sys">system</span><span class="m" style="color:var(--green)">✓ pipeline finished — every step real in the live OS<span class="cur"></span></span>';log.appendChild(el);log.scrollTop=log.scrollHeight;
+  running=false;runBtn.disabled=false;runBtn.textContent='▶ Simulate again';
+}
+runBtn.addEventListener('click',run);
+</script>
+</body>
+</html>

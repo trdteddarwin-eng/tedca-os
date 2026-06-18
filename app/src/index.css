@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif.woff2") format("woff2");
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-italic.woff2") format("woff2");
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Space Mono";
+  src: url("/fonts/space-mono.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Space Mono";
+  src: url("/fonts/space-mono-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+@theme {
+  --color-signal: #e63b2e;
+  --color-ink: #111111;
+  --color-paper: #e8e4dd;
+  --color-panel: #181816;
+  --color-edge: #2a2a27;
+  --font-display: "Instrument Serif", serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "Space Mono", monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-sans);
+}
+
+/* pixel office animations */
+@keyframes agent-typing {
+  0%, 100% { transform: translate(42px, -30px); }
+  50% { transform: translate(42px, -28px); }
+}
+.agent-typing {
+  animation: agent-typing 0.5s steps(2) infinite;
+}
+
+@keyframes zzz-float {
+  0% { opacity: 0; transform: translateY(4px); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-8px); }
+}
+.zzz-1 { animation: zzz-float 2.4s infinite; }
+.zzz-2 { animation: zzz-float 2.4s 0.8s infinite; }
+.zzz-3 { animation: zzz-float 2.4s 1.6s infinite; }

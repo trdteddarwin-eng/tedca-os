@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tedca OS — Cold-Email Engine PRD</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root { --paper:#E8E4DD; --ink:#111; --red:#E63B2E; --panel:#181816; --edge:#2a2a27; --green:#39d98a; --amber:#e3b341; --blue:#69b7ff; }
+  * { margin:0; box-sizing:border-box; }
+  body { background:var(--ink); color:var(--paper); font-family:Inter,sans-serif; line-height:1.6; }
+  .wrap { max-width:1060px; margin:0 auto; padding:56px 28px 120px; }
+  .serif { font-family:'Instrument Serif',serif; font-weight:400; }
+  .mono { font-family:'Space Mono',monospace; }
+  h1 { font-family:'Instrument Serif',serif; font-size:56px; font-weight:400; line-height:1.05; }
+  h1 em { color:var(--red); }
+  .sub { color:#999; margin-top:10px; max-width:640px; }
+  h2 { font-family:'Instrument Serif',serif; font-size:34px; font-weight:400; margin:72px 0 6px; }
+  h2 .n { color:var(--red); font-size:20px; vertical-align:top; margin-right:10px; font-family:'Space Mono',monospace; }
+  .lead { color:#aaa; margin-bottom:24px; max-width:720px; }
+  .card { background:var(--panel); border:1px solid var(--edge); border-radius:14px; padding:24px 26px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  @media (max-width:840px){ .grid2,.grid3 { grid-template-columns:1fr; } }
+  .tag { font-family:'Space Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.18em; color:#888; }
+  .tag.red { color:var(--red); } .tag.green { color:var(--green); } .tag.blue { color:var(--blue); } .tag.amber { color:var(--amber); }
+  .big { font-family:'Instrument Serif',serif; font-size:24px; margin-top:6px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { text-align:left; font-family:'Space Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:.15em; color:#888; padding:10px 12px; border-bottom:1px solid var(--edge); }
+  td { padding:11px 12px; border-bottom:1px solid #1f1f1d; vertical-align:top; }
+  td.mono { font-size:12.5px; color:#ccc; }
+  .ok { color:var(--green); } .warn { color:var(--amber); } .no { color:var(--red); }
+  .flow { display:flex; flex-direction:column; gap:0; }
+  .step { display:flex; gap:18px; align-items:flex-start; padding:18px 0; border-bottom:1px dashed #26261f; }
+  .step:last-child { border-bottom:none; }
+  .who { flex:0 0 122px; }
+  .who .nm { font-family:'Instrument Serif',serif; font-size:21px; }
+  .who .role { font-family:'Space Mono',monospace; font-size:10px; text-transform:uppercase; letter-spacing:.15em; color:#888; margin-top:2px; }
+  .what { flex:1; color:#ccc; font-size:14.5px; }
+  .what b { color:var(--paper); }
+  .pill { display:inline-block; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:.12em; text-transform:uppercase; border:1px solid var(--edge); border-radius:99px; padding:3px 10px; margin:2px 4px 2px 0; color:#aaa; }
+  .pill.mac { border-color:#4a7fb5; color:#9cc3e8; }
+  .pill.cloud { border-color:#7a5cc0; color:#c0aaf0; }
+  .pill.free { border-color:#2c6b4f; color:var(--green); }
+  code { font-family:'Space Mono',monospace; font-size:12.5px; background:#0c0c0a; border:1px solid var(--edge); border-radius:5px; padding:2px 7px; color:#ddd; }
+  .arch { font-family:'Space Mono',monospace; font-size:12.5px; line-height:1.85; background:#0c0c0a; border:1px solid var(--edge); border-radius:12px; padding:22px 26px; overflow-x:auto; white-space:pre; color:#bbb; }
+  .arch b { color:var(--paper); } .arch .r { color:var(--red); } .arch .g { color:var(--green); } .arch .b { color:var(--blue); }
+  .rule { border-left:3px solid var(--red); padding:4px 0 4px 16px; margin:14px 0; color:#ccc; font-size:14.5px; }
+  .rule b { color:var(--paper); }
+  footer { margin-top:90px; color:#666; font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.15em; text-transform:uppercase; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="tag red">TEDCA OS · PRD · COLD-EMAIL ENGINE · JUNE 2026</p>
+  <h1>How the email <em>machine</em> works.</h1>
+  <p class="sub">Every part of the system, where it physically runs, what it costs, and the rules it can never break. This is the machine as built — nothing aspirational on this page.</p>
+
+  <h2><span class="n">01</span>Where it runs — today vs. after deploy</h2>
+  <p class="lead">Today everything runs on your Mac (local-first, by design). One command starts it. After you say "deploy," the brain moves to Railway and runs 24/7 — your Mac only wakes for scraping and Obsidian.</p>
+  <div class="arch"><b>TODAY (local-first)</b>                          <b>AFTER "DEPLOY" (Railway)</b>
+
+ Your Mac ──────────────────────┐            Phone / Laptop (anywhere)
+   <span class="b">app</span>     React UI :5173        │                   │
+   <span class="b">server</span>  Express + SQLite :8790│            <span class="r">Railway cloud (24/7)</span>
+   <span class="b">worker</span>  scrape + TTS jobs     │              server + Postgres
+        │                       │              sender · replies · scheduler
+        ▼                       │                   │
+   <span class="g">./tedca-os/dev.sh</span> starts all 3│            Your Mac (only when on)
+                                │              worker: Apify scrape · brain/
+ Mac must be ON for anything    │            Mac can be OFF — engine keeps
+ to run (incl. 9am schedule)    │            sending, reading, replying</div>
+
+  <h2><span class="n">02</span>The tech, honestly</h2>
+  <div class="grid3">
+    <div class="card"><p class="tag blue">Frontend</p><p class="big">React + Vite + Tailwind</p><p style="color:#999;font-size:14px">Dark mission-control UI. Pixel office, CRM, pipeline, live feed over a WebSocket that auto-reconnects.</p></div>
+    <div class="card"><p class="tag blue">Backend</p><p class="big">Node + Express</p><p style="color:#999;font-size:14px">One process: API, WebSocket feed, the run engine, follow-up loop, reply poller, 9am scheduler. No frameworks beyond Express.</p></div>
+    <div class="card"><p class="tag blue">Database</p><p class="big">SQLite → Postgres</p><p style="color:#999;font-size:14px">Node's built-in SQLite today (one file on disk, survives everything). Swaps to Railway Postgres at deploy.</p></div>
+  </div>
+  <div style="margin-top:18px" class="card">
+    <p class="tag">External services (the only money in the system)</p>
+    <table>
+      <tr><th>Service</th><th>Job</th><th>Cost</th><th>Runs from</th></tr>
+      <tr><td><b>Apify</b> <span class="mono" style="color:#777">compass/crawler-google-places</span></td><td>One run, many searches → businesses + domains</td><td class="ok">free tier (1 run/day)</td><td><span class="pill mac">Mac worker</span></td></tr>
+      <tr><td><b>AnyMailFinder</b></td><td>Find CEO → fallback: any validated email at domain</td><td>credits, only charged on found</td><td><span class="pill cloud">server</span></td></tr>
+      <tr><td><b>Gmail API</b></td><td>Send, read replies, threads — per-inbox OAuth</td><td class="ok">free</td><td><span class="pill cloud">server</span></td></tr>
+      <tr><td><b>OpenRouter</b> <span class="mono" style="color:#777">claude-haiku / sonnet</span></td><td>Classify replies · draft tailored answers · content skills</td><td>~cents, logged to <code>costs</code></td><td><span class="pill cloud">server</span></td></tr>
+      <tr><td><b>Telegram Bot</b></td><td>Run reports · reply alerts · (next: blocking approvals)</td><td class="ok">free</td><td><span class="pill cloud">server</span></td></tr>
+      <tr><td><b>Zapmail</b> (incoming)</td><td>12 pre-warmed inboxes on 4 fresh domains</td><td>$149 then $84/mo</td><td>external</td></tr>
+    </table>
+  </div>
+
+  <h2><span class="n">03</span>The morning run — five workers, one pipeline</h2>
+  <p class="lead">One button (or the 9:00 weekday scheduler). Everything below is deterministic code — the only LLM calls in the entire engine are reply classification and the tailored reply draft.</p>
+  <div class="card flow">
+    <div class="step"><div class="who"><p class="nm">Scout</p><p class="role">research</p></div><div class="what">Takes the brief: niche + locations + lead target. You pick niche from a dropdown; each location becomes its own search. <b>"med spas in Union NJ | med spas in Elizabeth NJ"</b> = one Apify run, two searches.</div></div>
+    <div class="step"><div class="who"><p class="nm">Harvester</p><p class="role">scraper</p></div><div class="what"><b>Bank first.</b> Yesterday's un-emailed leads are free inventory — if they cover today's target, $0 spent. Only scrapes when short, max <b>2 runs per day</b>, over-fetching 3× the deficit because verification kills a chunk.</div></div>
+    <div class="step"><div class="who"><p class="nm">Inspector</p><p class="role">email finder</p></div><div class="what">Per lead: AnyMailFinder decision-maker ("CEO") search → if none indexed (typical for local spas), falls back to <b>any validated email at the domain</b>, preferring personal addresses over info@. <b>Valid only — risky/unknown are skipped forever</b> (bounces are what kill inboxes). Dead leads are remembered, never re-checked.</div></div>
+    <div class="step"><div class="who"><p class="nm">Courier</p><p class="role">sender</p></div><div class="what">Starts sending <b>the moment the first verified lead exists</b> — runs concurrently with scraping/verification. Rotates inboxes under per-inbox daily caps, 9–14s random gaps, business hours only (Mon–Fri 9–5). Schedules exactly <b>one</b> follow-up (+3 days). Leftovers → bank.</div></div>
+    <div class="step"><div class="who"><p class="nm">Concierge</p><p class="role">replies · 24/7</p></div><div class="what">Polls all inboxes every 2 minutes. Any reply <b>instantly kills follow-ups</b> for that lead, then: <span class="ok">interested/neutral</span> → short lowercase answer + patient-engine link, same thread · <span class="warn">negative</span> → Telegram flag, no link, human decides · <span class="no">unsubscribe</span> → do-not-contact forever, no reply, no exceptions.</div></div>
+  </div>
+
+  <h2><span class="n">04</span>Sending safety — the rules that protect the inboxes</h2>
+  <div class="card">
+    <div class="rule"><b>Verified emails only.</b> A lead without a validated address never gets sent to. This is the #1 rule; bounces are what get domains flagged.</div>
+    <div class="rule"><b>Per-inbox daily caps</b> (default 20, new Zapmail inboxes start at 10), volume spread across all inboxes — adding inboxes thins the load automatically.</div>
+    <div class="rule"><b>Random 9–14 second gaps</b> between sends, business hours only, exactly one follow-up per lead, ever.</div>
+    <div class="rule"><b>Test mode</b> until you flip it: every email diverts to your own Gmail with the real lead's address in the subject. Live mode is an explicit switch.</div>
+    <div class="rule"><b>Warmup runs forever</b> (external tool / Zapmail) on every inbox in the pool — pre-warmed ≠ warm forever.</div>
+  </div>
+
+  <h2><span class="n">05</span>The data — what's yours and where it lives</h2>
+  <div class="grid2">
+    <div class="card">
+      <p class="tag green">Yours forever (on your disk)</p>
+      <table>
+        <tr><td class="mono">leads</td><td>every business, domain, email, verify status, stage</td></tr>
+        <tr><td class="mono">emails</td><td>every send + reply, full text, which inbox</td></tr>
+        <tr><td class="mono">runs / activity_events</td><td>full history of every run, every step</td></tr>
+        <tr><td class="mono">costs</td><td>every paid call → monthly total on Home</td></tr>
+        <tr><td class="mono">settings</td><td>copy, caps, niche, schedule, test mode</td></tr>
+      </table>
+      <p style="color:#888;font-size:13px;margin-top:10px">File: <code>tedca-os/server/data/tedca-os.db</code> · views: CRM, Pipeline, Automations, Live Activity</p>
+    </div>
+    <div class="card">
+      <p class="tag amber">Rented (dies if you stop paying)</p>
+      <table>
+        <tr><td class="mono">zapmail inboxes</td><td>sending capacity — treat as disposable infrastructure</td></tr>
+        <tr><td class="mono">their 4 domains</td><td>reputation lives and dies with the subscription</td></tr>
+      </table>
+      <p style="color:#888;font-size:13px;margin-top:14px">The play: cold email exists to get a <b>reply</b>; the conversation and the relationship land in <b>your</b> CRM and your real inboxes. Capacity is rented, the asset is the database.</p>
+      <p class="tag" style="margin-top:16px">secrets</p>
+      <p style="color:#888;font-size:13px">All keys in <code>tedca-os/.env</code> (gitignored). OAuth refresh tokens server-side only, never in the browser. Password gate on the UI.</p>
+    </div>
+  </div>
+
+  <h2><span class="n">06</span>Status board</h2>
+  <div class="card">
+    <table>
+      <tr><th>Piece</th><th>State</th><th>Proof</th></tr>
+      <tr><td>5 tedcas.org inboxes OAuth'd</td><td class="ok">✓ live</td><td>test sends received, tokens persist</td></tr>
+      <tr><td>Scrape (multi-city, one run, dedupe)</td><td class="ok">✓ live</td><td>33 real med spas in CRM</td></tr>
+      <tr><td>Lead bank + re-use before scrape</td><td class="ok">✓ live</td><td>33 banked, run 3 used $0 scraping on retry</td></tr>
+      <tr><td>Verify w/ CEO→company fallback</td><td class="warn">built, fallback API-tested</td><td>needs one full run (the 5-lead test)</td></tr>
+      <tr><td>Send engine (caps/rotation/jitter/followup)</td><td class="warn">built</td><td>needs same 5-lead run to witness</td></tr>
+      <tr><td>Reply handling — 3 branches</td><td class="warn">built</td><td>needs you to reply to a test email</td></tr>
+      <tr><td>Telegram notifications</td><td class="ok">✓ live</td><td>you got the test message</td></tr>
+      <tr><td>9am weekday scheduler</td><td class="warn">built, OFF</td><td>flips on when you say so</td></tr>
+      <tr><td>Blocking Telegram approvals (spend &gt; $0.50)</td><td class="no">not built</td><td>next on M8</td></tr>
+      <tr><td>Live mode (real leads get email)</td><td class="no">off by design</td><td>after you approve a test run</td></tr>
+      <tr><td>Railway deploy (Mac can sleep)</td><td class="no">waiting on your word</td><td>final milestone</td></tr>
+    </table>
+  </div>
+
+  <footer>TEDCA OS · BUILT LOCAL-FIRST · NO BUTTON EXISTS UNLESS IT ACTUALLY WORKS</footer>
+</div>
+</body>
+</html>
