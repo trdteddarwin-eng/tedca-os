@@ -1,3 +1,7 @@
+// When the dashboard is hosted off-origin (e.g. on Vercel), set VITE_API_BASE to
+// the backend URL (the Railway server). Empty = same-origin (local / Railway-served).
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || "";
+
 let token: string | null = sessionStorage.getItem("tedca_token");
 
 export function getToken() {
@@ -11,7 +15,7 @@ export function setToken(t: string | null) {
 }
 
 export async function api(path: string, options: RequestInit = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(API_BASE + path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -29,7 +33,7 @@ export async function api(path: string, options: RequestInit = {}) {
 }
 
 export async function login(password: string) {
-  const res = await fetch("/api/login", {
+  const res = await fetch(API_BASE + "/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
@@ -51,8 +55,10 @@ export function openFeed(
 
   function connect() {
     if (closed || !token) return;
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${location.host}/ws?token=${token}`);
+    const wsUrl = API_BASE
+      ? API_BASE.replace(/^http/, "ws") + `/ws?token=${token}`
+      : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?token=${token}`;
+    ws = new WebSocket(wsUrl);
     ws.onopen = () => {
       retry = 1000;
       onStatus?.(true);

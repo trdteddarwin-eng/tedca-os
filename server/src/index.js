@@ -41,6 +41,23 @@ if (!WORKER_TOKEN) {
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
+// ---- CORS ----------------------------------------------------------------
+// The dashboard front-end can be hosted off-origin (e.g. on Vercel) and still
+// call this API. Auth is a Bearer token (not cookies), so reflecting the request
+// origin is safe — every protected route still requires a valid login token.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,Range");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Range,Accept-Ranges,Content-Length");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  next();
+});
+
 // ---- auth ----------------------------------------------------------------
 // Single-user password gate. Sessions are persisted in SQLite so a server
 // restart doesn't silently log the browser out.
