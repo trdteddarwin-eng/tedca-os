@@ -17,6 +17,10 @@ output/
 .DS_Store
 *.log
 
+# generated report/presentation artifacts (regeneratable, not app code)
+audit-report.html
+obsidian-crm-structure.html
+
 # parent repo ignores all package.json — re-include ours (Railway needs them)
 !package.json
 !**/package.json

@@ -4,6 +4,8 @@ import crypto from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { db } from "./db.js";
 import { gmailConfigured, authorizedInboxes, startAuth, sendEmail, importTokens } from "./gmail.js";
+import { smtpInboxMeta } from "./smtp.js";
+import { sendingInboxes, sendVia } from "./pool.js";
 import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, getSetting } from "./engine.js";
 import { startReplyLoop, bindReplyLogger } from "./replies.js";
 import { telegramConfigured, sendTelegramFile } from "./telegram.js";
@@ -198,6 +200,32 @@ app.get("/api/leads", requireUser, (req, res) => {
   res.json(db.prepare("SELECT * FROM leads ORDER BY id DESC LIMIT 500").all());
 });
 
+// One lead + its full message timeline — the CRM detail view ("everything in one place")
+app.get("/api/leads/:id", requireUser, (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: "lead not found" });
+  const emails = db
+    .prepare("SELECT id, inbox, direction, subject, body, kind, sent_at FROM emails WHERE lead_id=? ORDER BY id")
+    .all(lead.id);
+  res.json({ lead, emails });
+});
+
+// Edit the human-owned CRM fields (LinkedIn, notes, stage, …)
+app.patch("/api/leads/:id", requireUser, (req, res) => {
+  const editable = [
+    "linkedin_url", "contact_title", "phone", "city", "state",
+    "employee_size", "stage", "deal_value", "tags", "notes", "sentiment", "ceo_name",
+  ];
+  const body = req.body || {};
+  const sets = [], vals = [];
+  for (const k of editable) if (k in body) { sets.push(`${k}=?`); vals.push(body[k]); }
+  if (!sets.length) return res.json({ ok: true });
+  sets.push("updated_at=datetime('now')");
+  vals.push(req.params.id);
+  db.prepare(`UPDATE leads SET ${sets.join(", ")} WHERE id=?`).run(...vals);
+  res.json({ ok: true, lead: db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id) });
+});
+
 // Every email ever sent or received, with the business it belongs to.
 app.get("/api/emails", requireUser, (req, res) => {
   res.json(
@@ -279,9 +307,18 @@ app.put("/api/settings", requireUser, (req, res) => {
 
 // ---- Gmail -----------------------------------------------------------------
 app.get("/api/gmail/status", requireUser, (req, res) => {
+  const gmail = authorizedInboxes().map((i) => ({ ...i, transport: "gmail" }));
+  // Zapmail inboxes auth by app password — always "connected", with today's ramp cap
+  const smtp = smtpInboxMeta().map((m) => ({
+    email: m.email,
+    authorized: true,
+    transport: "smtp",
+    cap: m.cap,
+    firstName: m.firstName,
+  }));
   res.json({
-    configured: gmailConfigured(),
-    inboxes: authorizedInboxes(),
+    configured: gmailConfigured() || smtp.length > 0,
+    inboxes: [...gmail, ...smtp],
     test_recipient: process.env.TEST_RECIPIENT || null,
   });
 });
@@ -308,13 +345,13 @@ app.post("/api/gmail/auth", requireUser, async (req, res) => {
 app.post("/api/gmail/test-send", requireUser, async (req, res) => {
   const to = (req.body || {}).to || process.env.TEST_RECIPIENT;
   if (!to) return res.status(400).json({ error: "no recipient — set TEST_RECIPIENT in .env or pass `to`" });
-  const ready = authorizedInboxes().filter((i) => i.authorized);
-  if (!ready.length) return res.status(400).json({ error: "no authorized inboxes yet" });
+  const ready = sendingInboxes(); // gmail (authorized) + zapmail smtp
+  if (!ready.length) return res.status(400).json({ error: "no connected inboxes yet" });
   const results = [];
   for (const { email } of ready) {
     try {
       logEvent({ actor: "send", message: `Sending test email from ${email} → ${to}`, level: "info" });
-      const r = await sendEmail({
+      const r = await sendVia({
         from: email,
         to,
         subject: `Tedca OS test — ${email}`,
@@ -323,7 +360,7 @@ app.post("/api/gmail/test-send", requireUser, async (req, res) => {
       db.prepare(
         "INSERT INTO emails (lead_id, inbox, direction, subject, body, kind, sent_at) VALUES (NULL, ?, 'out', ?, ?, 'test', datetime('now'))"
       ).run(email, `Tedca OS test — ${email}`, `test to ${to}`);
-      logEvent({ actor: "send", message: `Test email delivered to Gmail API from ${email} (id ${r.id})`, level: "success" });
+      logEvent({ actor: "send", message: `Test email sent from ${email} (id ${r.id})`, level: "success" });
       results.push({ email, ok: true, id: r.id });
     } catch (e) {
       logEvent({ actor: "send", message: `Test send FAILED from ${email}: ${e.message}`, level: "error" });

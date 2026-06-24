@@ -105,6 +105,29 @@ try {
   /* column already exists */
 }
 
+// CRM enrichment fields — added per-lead, editable in the dashboard
+for (const col of [
+  "linkedin_url TEXT",
+  "contact_title TEXT",
+  "phone TEXT",
+  "city TEXT",
+  "state TEXT",
+  "employee_size TEXT",
+  "stage TEXT",        // lead | contacted | replied | booked | won | lost
+  "deal_value REAL",
+  "tags TEXT",         // comma-separated
+  "notes TEXT",
+  "sentiment TEXT",    // interested | neutral | negative
+  "created_at TEXT",
+  "updated_at TEXT",
+]) {
+  try {
+    db.exec(`ALTER TABLE leads ADD COLUMN ${col}`);
+  } catch {
+    /* column already exists */
+  }
+}
+
 // persist user sessions so a server restart doesn't log the browser out
 try {
   db.exec(`CREATE TABLE IF NOT EXISTS sessions (

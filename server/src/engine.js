@@ -2,8 +2,10 @@
 // Server-side steps run here; the scrape executes on the user's Mac via the jobs queue.
 import { db } from "./db.js";
 import { findCeo, amfConfigured } from "./anymailfinder.js";
-import { sendEmail, authorizedInboxes } from "./gmail.js";
 import { sendTelegram } from "./telegram.js";
+import { sendingInboxes, sendVia, isSmtp } from "./pool.js";
+import { smtpInboxCap } from "./smtp.js";
+import { isSuppressed } from "./replies.js";
 
 let logEvent = () => {};
 export function bindLogger(fn) {
@@ -56,6 +58,7 @@ async function executeRun(runId, { target, searchQuery }) {
   // Producer/consumer: Inspector keeps a queue of verified leads topped up
   // (scraping more when supply runs dry) WHILE Courier sends from the queue.
   const queue = [];
+  const enqueued = new Set(); // never queue the same lead twice → no duplicate sends
   let producing = true;
   let scrapesUsed = 0;
 
@@ -110,9 +113,12 @@ async function executeRun(runId, { target, searchQuery }) {
           // mark as consumed from the pool either way so we don't re-verify endlessly
           db.prepare("UPDATE leads SET banked=0 WHERE id=?").run(id);
           if (v) {
-            queue.push(id);
-            supplied++;
-            pushedThisPass++;
+            if (!enqueued.has(id)) {
+              queue.push(id);
+              enqueued.add(id);
+              supplied++;
+              pushedThisPass++;
+            }
           } else {
             // dead lead: keep in CRM but out of future pools
             db.prepare("UPDATE leads SET status='scraped', banked=0, email_status=COALESCE(email_status,'unknown') WHERE id=? AND email IS NULL").run(id);
@@ -249,18 +255,34 @@ function ingestLeads(items, source) {
 // ── sender: caps, rotation, jitter, test mode ────────────────────────────────
 function fillTemplate(tpl, lead) {
   const first = (lead.ceo_name || "").split(" ")[0] || "there";
+  // callback replacers avoid $-pattern expansion ($&, $$, …) from lead text;
+  // clean() strips CR/LF so a scraped name can't inject email headers.
+  const clean = (v) => String(v).replace(/[\r\n]+/g, " ");
   return tpl
-    .replaceAll("{business_name}", lead.business_name || "your business")
-    .replaceAll("{first_name}", first)
-    .replaceAll("{category}", lead.category || "business")
-    .replaceAll("{rating}", lead.rating != null ? String(lead.rating) : "great")
-    .replaceAll("{review_count}", lead.review_count != null ? String(lead.review_count) : "many");
+    .replaceAll("{business_name}", () => clean(lead.business_name || "your business"))
+    .replaceAll("{first_name}", () => clean(first))
+    .replaceAll("{category}", () => clean(lead.category || "business"))
+    .replaceAll("{rating}", () => (lead.rating != null ? String(lead.rating) : "great"))
+    .replaceAll("{review_count}", () => (lead.review_count != null ? String(lead.review_count) : "many"));
 }
 
 function sentTodayByInbox(inbox) {
   return db
     .prepare("SELECT COUNT(*) c FROM emails WHERE inbox=? AND direction='out' AND kind IN ('initial','followup') AND sent_at >= date('now')")
     .get(inbox).c;
+}
+
+// daily cap per inbox: mature Gmail inboxes use the flat setting; new Zapmail
+// (SMTP) inboxes follow an age-based warmup ramp (12 → 50 over the first week).
+function capFor(inbox) {
+  return isSmtp(inbox) ? smtpInboxCap(inbox) : Number(getSetting("per_inbox_cap") || 20);
+}
+
+// CAN-SPAM: every cold send needs an opt-out and a physical mailing address.
+// Stored as the `compliance_footer` setting; appended to the body before send.
+function withCompliance(body) {
+  const footer = getSetting("compliance_footer");
+  return footer ? `${body}\n\n${footer}` : body;
 }
 
 // Consumer: drains the verified-lead queue while the producer is still filling it.
@@ -275,10 +297,21 @@ async function sendFromQueue(runId, queue, isProducing, target) {
   );
   let sent = 0;
   while (sent < target) {
+    // stop cleanly when business hours close — don't bleed sends into the evening
+    if (!withinSendWindow()) {
+      log("Business hours are over (Mon–Fri 9–17) — banking the rest for tomorrow.", "warn");
+      break;
+    }
     if (!queue.length) {
       if (!isProducing()) break; // producer finished and queue is empty
       await sleep(1500); // wait for verification/scrape to supply more
       continue;
+    }
+    // if every inbox is already at its daily cap, stop — don't spin discarding the queue
+    const pool = sendingInboxes().map((i) => i.email);
+    if (pool.length && pool.every((e) => sentTodayByInbox(e) >= capFor(e))) {
+      log("Every inbox has hit today's safe cap — banking the rest for tomorrow.", "warn");
+      break;
     }
     const id = queue.shift();
     const n = await sendBatch(runId, [id], { quiet: true });
@@ -294,19 +327,23 @@ async function sendBatch(runId, leadIds, { quiet = false } = {}) {
     logEvent({ run_id: runId, actor: "send", message: m, level });
   };
   const testMode = getSetting("test_mode") === "1";
-  const cap = Number(getSetting("per_inbox_cap") || 20);
   const followupDays = Number(getSetting("followup_days") || 3);
   const subjectTpl = getSetting("email_subject");
   const bodyTpl = getSetting("email_body");
   const testRecipient = process.env.TEST_RECIPIENT || "";
 
-  const ready = authorizedInboxes().filter((i) => i.authorized).map((i) => i.email);
+  const ready = sendingInboxes().map((i) => i.email);
   if (!ready.length) {
     log("No connected inboxes — cannot send", "error");
     return 0;
   }
   if (testMode && !testRecipient) {
     log("TEST MODE but no TEST_RECIPIENT in .env — cannot send", "error");
+    return 0;
+  }
+  // CAN-SPAM gate: never send to real leads without an opt-out + mailing address
+  if (!testMode && !getSetting("compliance_footer")) {
+    log("LIVE mode blocked: no compliance_footer set (CAN-SPAM needs an opt-out + physical address). Add it before going live.", "error");
     return 0;
   }
   log(testMode ? `TEST MODE: every email goes to ${testRecipient}` : "LIVE mode — these emails go to real business owners.", testMode ? "warn" : "info");
@@ -316,27 +353,31 @@ async function sendBatch(runId, leadIds, { quiet = false } = {}) {
   for (const id of leadIds) {
     const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
     if (!lead?.email) continue;
+    if (isSuppressed(lead.email)) {
+      log(`Skipping ${lead.business_name} — that address opted out before.`, "info");
+      continue;
+    }
 
     // pick next inbox under its daily cap
     let inbox = null;
     for (let i = 0; i < ready.length; i++) {
       const candidate = ready[(inboxIdx + i) % ready.length];
-      if (sentTodayByInbox(candidate) < cap) {
+      if (sentTodayByInbox(candidate) < capFor(candidate)) {
         inbox = candidate;
         inboxIdx = (inboxIdx + i + 1) % ready.length;
         break;
       }
     }
     if (!inbox) {
-      log(`Every inbox hit its safe daily limit (${cap} each) — pausing sends until tomorrow to protect them.`, "warn");
+      log("Every inbox hit its safe daily limit for today — pausing sends until tomorrow to protect them.", "warn");
       break;
     }
 
     const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + fillTemplate(subjectTpl, lead);
-    const body = fillTemplate(bodyTpl, lead);
+    const body = withCompliance(fillTemplate(bodyTpl, lead));
     const to = testMode ? testRecipient : lead.email;
     try {
-      await sendEmail({ from: inbox, to, subject, body });
+      await sendVia({ from: inbox, to, subject, body });
       db.prepare(
         "INSERT INTO emails (lead_id, inbox, direction, subject, body, kind, sent_at) VALUES (?, ?, 'out', ?, ?, 'initial', datetime('now'))"
       ).run(id, inbox, subject, body);
@@ -395,15 +436,18 @@ export function startFollowupLoop() {
     if (!due.length) return;
     const testMode = getSetting("test_mode") === "1";
     const testRecipient = process.env.TEST_RECIPIENT || "";
+    // same CAN-SPAM + test guards the initial-send path enforces
+    if (!testMode && !getSetting("compliance_footer")) return;
+    if (testMode && !testRecipient) return;
     const tpl = getSetting("followup_body");
-    const cap = Number(getSetting("per_inbox_cap") || 20);
     for (const lead of due) {
       const inbox = lead.inbox_used;
-      if (!inbox || sentTodayByInbox(inbox) >= cap) continue;
+      if (!inbox || sentTodayByInbox(inbox) >= capFor(inbox)) continue;
+      if (isSuppressed(lead.email)) continue;
       const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + `Re: ` + fillTemplate(getSetting("email_subject"), lead);
-      const body = fillTemplate(tpl, lead);
+      const body = withCompliance(fillTemplate(tpl, lead));
       try {
-        await sendEmail({ from: inbox, to: testMode ? testRecipient : lead.email, subject, body });
+        await sendVia({ from: inbox, to: testMode ? testRecipient : lead.email, subject, body });
         db.prepare(
           "INSERT INTO emails (lead_id, inbox, direction, subject, body, kind, sent_at) VALUES (?, ?, 'out', ?, ?, 'followup', datetime('now'))"
         ).run(lead.id, inbox, subject, body);

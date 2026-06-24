@@ -4,7 +4,10 @@
 //   negative           → flag to the user on Telegram, NO link, no more emails
 //   unsubscribe        → permanent do-not-contact, no reply ever
 import { db } from "./db.js";
-import { authorizedInboxes, listInboxMessages, getMessage, sendEmail } from "./gmail.js";
+import { authorizedInboxes, listInboxMessages, getMessage } from "./gmail.js";
+import { sendingInboxes, sendVia } from "./pool.js";
+import { smtpInboxes } from "./smtp.js";
+import { listImapReplies } from "./imap.js";
 import { sendTelegram } from "./telegram.js";
 
 const OPENROUTER = "https://openrouter.ai/api/v1/chat/completions";
@@ -16,10 +19,45 @@ export function bindReplyLogger(fn) {
 }
 
 db.exec(`CREATE TABLE IF NOT EXISTS seen_messages (id TEXT PRIMARY KEY, inbox TEXT, ts TEXT DEFAULT (datetime('now')))`);
+db.exec(`CREATE TABLE IF NOT EXISTS suppressions (email TEXT PRIMARY KEY, ts TEXT DEFAULT (datetime('now')))`);
 try {
   db.exec("ALTER TABLE emails ADD COLUMN gmail_id TEXT");
 } catch {
   /* exists */
+}
+
+// permanent opt-out list, keyed by email (survives re-scrapes under new lead rows)
+export function isSuppressed(email) {
+  return Boolean(db.prepare("SELECT 1 FROM suppressions WHERE email=?").get(String(email || "").toLowerCase()));
+}
+function suppress(email) {
+  if (email) db.prepare("INSERT OR IGNORE INTO suppressions (email) VALUES (?)").run(String(email).toLowerCase());
+}
+
+// CAN-SPAM footer for auto-replies (same setting the cold-send engine uses)
+function withCompliance(body) {
+  const footer = db.prepare("SELECT value FROM settings WHERE key='compliance_footer'").get()?.value;
+  return footer ? `${body}\n\n${footer}` : body;
+}
+
+// drop quoted history so we classify only what the lead actually wrote (and so
+// our own quoted footer/opt-out text can't trip the unsubscribe classifier)
+function stripQuoted(text) {
+  const out = [];
+  for (const ln of String(text || "").split(/\r?\n/)) {
+    if (/^\s*>/.test(ln)) break;
+    if (/^\s*On .+ wrote:\s*$/i.test(ln)) break;
+    if (/^\s*-{2,}\s*Original Message/i.test(ln)) break;
+    out.push(ln);
+  }
+  return out.join("\n").trim();
+}
+
+// deterministic opt-out — one-click List-Unsubscribe sends subject "unsubscribe"
+// with an empty body, which the LLM classifier would otherwise miss
+function looksUnsubscribe(subject, body) {
+  const s = `${subject || ""} ${body || ""}`.toLowerCase();
+  return /\bunsubscribe\b|\bremove me\b|\bopt(?:ed)? out\b|\btake me off\b|\bremove (?:me )?from (?:your )?list\b/.test(s);
 }
 
 function extractEmail(fromHeader) {
@@ -79,10 +117,10 @@ async function tailoredReply(replyText, lead) {
   return (data.choices?.[0]?.message?.content || "").trim();
 }
 
-async function handleReply(inbox, msg) {
+export async function handleReply(inbox, msg) {
   const fromEmail = extractEmail(msg.from);
-  // ignore our own inboxes talking to each other
-  const ours = authorizedInboxes().map((i) => i.email.toLowerCase());
+  // ignore our own inboxes talking to each other (all 17: gmail + zapmail)
+  const ours = sendingInboxes().map((i) => i.email.toLowerCase());
   if (ours.includes(fromEmail)) return;
 
   const lead = leadFromMessage(fromEmail, msg.subject);
@@ -97,18 +135,41 @@ async function handleReply(inbox, msg) {
   db.prepare("UPDATE leads SET status='replied', followup_due_at=NULL, last_touch_at=datetime('now') WHERE id=?").run(lead.id);
   logEvent({ actor: "reply", message: `${lead.business_name} replied! Follow-ups stopped. Reading what they said…`, level: "success" });
 
-  // 2. classify and branch
+  const cleanBody = stripQuoted(msg.body);
+
+  // deterministic opt-out FIRST (covers one-click List-Unsubscribe: subject
+  // "unsubscribe" with an empty body, which the LLM would miss)
+  if (looksUnsubscribe(msg.subject, cleanBody)) {
+    db.prepare("UPDATE leads SET status='do_not_contact' WHERE id=?").run(lead.id);
+    suppress(lead.email);
+    logEvent({ actor: "reply", message: `${lead.business_name} asked to stop. Marked do-not-contact forever. No reply sent.`, level: "warn" });
+    await sendTelegram(`🛑 ${lead.business_name} asked to stop emailing. Suppressed permanently.`);
+    return;
+  }
+
+  // only ever auto-reply ONCE per lead → stops autoresponder/OOO ping-pong loops
+  const priorAutoReplies = db
+    .prepare("SELECT COUNT(*) c FROM emails WHERE lead_id=? AND direction='out' AND kind='reply'")
+    .get(lead.id).c;
+  if (priorAutoReplies > 0) {
+    logEvent({ actor: "reply", message: `${lead.business_name} messaged again — already auto-replied once, leaving this one for you.`, level: "info" });
+    await sendTelegram(`📨 ${lead.business_name} replied again (already auto-handled once). Check the CRM.`);
+    return;
+  }
+
+  // 2. classify and branch (on the de-quoted body)
   let verdict = "neutral";
   try {
-    verdict = await classify(msg.body, lead.business_name);
+    verdict = await classify(cleanBody, lead.business_name);
   } catch (e) {
     logEvent({ actor: "reply", message: `Could not auto-read the reply (${e.message}) — flagging it to you instead.`, level: "warn" });
-    await sendTelegram(`📨 ${lead.business_name} replied but I couldn't classify it. Check the CRM.\n\n"${msg.body.slice(0, 300)}"`);
+    await sendTelegram(`📨 ${lead.business_name} replied but I couldn't classify it. Check the CRM.\n\n"${cleanBody.slice(0, 300)}"`);
     return;
   }
 
   if (verdict === "unsubscribe") {
     db.prepare("UPDATE leads SET status='do_not_contact' WHERE id=?").run(lead.id);
+    suppress(lead.email);
     logEvent({ actor: "reply", message: `${lead.business_name} asked to stop. Marked do-not-contact forever. No reply sent.`, level: "warn" });
     await sendTelegram(`🛑 ${lead.business_name} asked to stop emailing. Suppressed permanently.`);
     return;
@@ -122,13 +183,18 @@ async function handleReply(inbox, msg) {
 
   // interested / neutral → tailored answer + the link
   try {
-    const replyBody = await tailoredReply(msg.body, lead);
+    const replyBody = await tailoredReply(cleanBody, lead);
+    if (!replyBody || replyBody.length < 10) {
+      logEvent({ actor: "reply", message: `Drafted reply for ${lead.business_name} came back empty — flagging for a manual reply.`, level: "warn" });
+      await sendTelegram(`📨 ${lead.business_name} (${verdict}) replied but I couldn't draft a solid reply. Check the CRM.`);
+      return;
+    }
     const to = testMode ? process.env.TEST_RECIPIENT : lead.email;
-    await sendEmail({
+    await sendVia({
       from: inbox,
       to,
-      subject: msg.subject.startsWith("Re:") ? msg.subject : `Re: ${msg.subject}`,
-      body: replyBody,
+      subject: /^re:/i.test(msg.subject) ? msg.subject : `Re: ${msg.subject}`,
+      body: withCompliance(replyBody),
       inReplyTo: msg.messageIdHeader,
     });
     db.prepare(
@@ -143,18 +209,42 @@ async function handleReply(inbox, msg) {
 }
 
 async function pollOnce() {
-  const inboxes = authorizedInboxes().filter((i) => i.authorized);
-  for (const { email } of inboxes) {
+  // Gmail-API inboxes (OAuth) — read via the Gmail API
+  const gmailInboxes = authorizedInboxes().filter((i) => i.authorized);
+  for (const { email } of gmailInboxes) {
     try {
       const msgs = await listInboxMessages(email, "in:inbox newer_than:3d");
       for (const { id } of msgs) {
         if (db.prepare("SELECT 1 FROM seen_messages WHERE id=?").get(id)) continue;
-        db.prepare("INSERT OR IGNORE INTO seen_messages (id, inbox) VALUES (?, ?)").run(id, email);
-        const msg = await getMessage(email, id);
-        await handleReply(email, msg);
+        try {
+          const msg = await getMessage(email, id);
+          await handleReply(email, msg);
+          // mark seen only after success so a transient error doesn't lose the reply
+          db.prepare("INSERT OR IGNORE INTO seen_messages (id, inbox) VALUES (?, ?)").run(id, email);
+        } catch (e) {
+          logEvent({ actor: "reply", message: `Couldn't process a message in ${email}: ${e.message}`, level: "warn" });
+        }
       }
     } catch (e) {
       logEvent({ actor: "reply", message: `Checking ${email} for replies failed: ${e.message}`, level: "warn" });
+    }
+  }
+
+  // Zapmail inboxes (app password) — read via IMAP, same Concierge handler
+  for (const email of smtpInboxes()) {
+    try {
+      const msgs = await listImapReplies(email, 3);
+      for (const msg of msgs) {
+        if (db.prepare("SELECT 1 FROM seen_messages WHERE id=?").get(msg.id)) continue;
+        try {
+          await handleReply(email, msg);
+          db.prepare("INSERT OR IGNORE INTO seen_messages (id, inbox) VALUES (?, ?)").run(msg.id, email);
+        } catch (e) {
+          logEvent({ actor: "reply", message: `Couldn't process a message in ${email}: ${e.message}`, level: "warn" });
+        }
+      }
+    } catch (e) {
+      logEvent({ actor: "reply", message: `Checking ${email} (IMAP) for replies failed: ${e.message}`, level: "warn" });
     }
   }
 }

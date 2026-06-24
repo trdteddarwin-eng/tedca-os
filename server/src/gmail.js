@@ -227,6 +227,7 @@ function b64url(s) {
 
 export async function sendEmail({ from, to, subject, body, inReplyTo = null }) {
   const accessToken = await refreshAccessToken(from);
+  subject = String(subject || "").replace(/[\r\n]+/g, " "); // guard against header injection
   // RFC 2047 encode the subject so non-ASCII (em-dashes, accents) survives transit
   const encSubject = /^[\x20-\x7e]*$/.test(subject)
     ? subject
@@ -237,6 +238,7 @@ export async function sendEmail({ from, to, subject, body, inReplyTo = null }) {
     `Subject: ${encSubject}`,
     "MIME-Version: 1.0",
     'Content-Type: text/plain; charset="UTF-8"',
+    `List-Unsubscribe: <mailto:${from}?subject=unsubscribe>`,
   ];
   if (inReplyTo) {
     headers.push(`In-Reply-To: ${inReplyTo}`, `References: ${inReplyTo}`);

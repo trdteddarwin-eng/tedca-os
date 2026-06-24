@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 
-type InboxStatus = { email: string; authorized: boolean };
+type InboxStatus = { email: string; authorized: boolean; transport?: "gmail" | "smtp"; cap?: number; firstName?: string };
 type Status = { configured: boolean; inboxes: InboxStatus[]; test_recipient: string | null };
 type SendResult = { email: string; ok: boolean; id?: string; error?: string };
 
@@ -76,19 +76,28 @@ export default function Inboxes() {
                   <p className="font-mono text-sm">{i.email}</p>
                   <p className={`font-mono text-[11px] uppercase tracking-widest mt-1 ${i.authorized ? "text-emerald-400" : "text-paper/40"}`}>
                     {i.authorized ? "● connected" : "○ not connected"}
+                    {i.transport === "smtp" && (
+                      <span className="text-paper/40 normal-case tracking-normal"> · Zapmail SMTP · {i.cap}/day today</span>
+                    )}
                   </p>
                 </div>
-                <button
-                  onClick={() => connect(i.email)}
-                  disabled={busy !== null}
-                  className={`rounded px-4 py-2 font-mono text-xs uppercase tracking-widest disabled:opacity-40 ${
-                    i.authorized
-                      ? "border border-edge text-paper/60 hover:text-paper"
-                      : "bg-signal text-paper hover:opacity-90"
-                  }`}
-                >
-                  {busy === i.email ? "…" : i.authorized ? "Reconnect" : "Connect"}
-                </button>
+                {i.transport === "smtp" ? (
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-paper/40 border border-edge rounded px-3 py-2 whitespace-nowrap">
+                    app password
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => connect(i.email)}
+                    disabled={busy !== null}
+                    className={`rounded px-4 py-2 font-mono text-xs uppercase tracking-widest disabled:opacity-40 ${
+                      i.authorized
+                        ? "border border-edge text-paper/60 hover:text-paper"
+                        : "bg-signal text-paper hover:opacity-90"
+                    }`}
+                  >
+                    {busy === i.email ? "…" : i.authorized ? "Reconnect" : "Connect"}
+                  </button>
+                )}
               </div>
             ))}
           </div>
