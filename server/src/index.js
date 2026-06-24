@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { db } from "./db.js";
 import { gmailConfigured, authorizedInboxes, startAuth, sendEmail, importTokens } from "./gmail.js";
-import { smtpInboxMeta } from "./smtp.js";
+import { smtpInboxMeta, importSmtpInboxes } from "./smtp.js";
 import { sendingInboxes, sendVia } from "./pool.js";
 import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, getSetting } from "./engine.js";
 import { startReplyLoop, bindReplyLogger } from "./replies.js";
@@ -281,6 +281,15 @@ app.post("/api/gmail/import-tokens", requireUser, (req, res) => {
   if (!tokens || typeof tokens !== "object") return res.status(400).json({ error: "tokens object required" });
   const count = importTokens(tokens);
   logEvent({ actor: "send", message: `Inbox authorizations imported for ${count} inboxes.`, level: "success" });
+  res.json({ ok: true, count });
+});
+
+// Cloud bootstrap: receive the Zapmail (SMTP) inbox credentials from the local instance
+app.post("/api/smtp/import-inboxes", requireUser, (req, res) => {
+  const { inboxes } = req.body || {};
+  if (!inboxes || typeof inboxes !== "object") return res.status(400).json({ error: "inboxes object required" });
+  const count = importSmtpInboxes(inboxes);
+  logEvent({ actor: "send", message: `Zapmail inbox credentials imported for ${count} inboxes.`, level: "success" });
   res.json({ ok: true, count });
 });
 

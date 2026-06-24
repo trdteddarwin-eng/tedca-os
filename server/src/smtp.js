@@ -29,6 +29,17 @@ export function smtpInboxes() {
   return Object.keys(load());
 }
 
+// cloud bootstrap: write the inbox store from a local export (mirrors gmail importTokens).
+// Lets us push the 12 Zapmail credentials to the cloud volume over an authed HTTPS call.
+export function importSmtpInboxes(obj) {
+  const data = obj && typeof obj === "object" ? obj : {};
+  fs.mkdirSync(path.dirname(STORE_PATH), { recursive: true });
+  fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.chmodSync(STORE_PATH, 0o600);
+  transporters.clear(); // drop cached transporters so new creds take effect immediately
+  return Object.keys(data).length;
+}
+
 export function isSmtpInbox(email) {
   return Boolean(load()[String(email).toLowerCase()]);
 }
