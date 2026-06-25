@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, apiBlobUrl } from "../api";
 
 type Job = {
   id: number;
@@ -110,26 +110,78 @@ export default function Jobs() {
                     <div>started<br /><span className="text-paper/80">{when(j.claimed_at)}</span></div>
                     <div>finished<br /><span className="text-paper/80">{when(j.finished_at)}</span></div>
                   </div>
-                  {j.result && (
-                    <div className="mt-2">
-                      <div className="font-mono text-[10px] uppercase tracking-widest text-paper/40">
-                        {j.status === "failed" ? "Error" : "Result"}
-                      </div>
-                      <pre
-                        className={`mt-1 text-xs whitespace-pre-wrap break-words font-mono ${
-                          j.status === "failed" ? "text-signal" : "text-paper/70"
-                        }`}
-                      >
-                        {j.result.slice(0, 1500)}
-                      </pre>
-                    </div>
-                  )}
+                  <JobMedia id={j.id} status={j.status} result={j.result} />
                 </div>
               )}
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Renders the actual generated output — playable video / image preview — not JSON.
+function JobMedia({ id, status, result }: { id: number; status: string; result: string | null }) {
+  const [files, setFiles] = useState<{ name: string; kind: string; url: string }[] | null>(null);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let revoke: string[] = [];
+    let alive = true;
+    api(`/api/jobs/${id}/media`)
+      .then(async (d) => {
+        if (!alive) return;
+        setFiles(d.files);
+        const map: Record<string, string> = {};
+        for (const f of (d.files || []).slice(0, 8)) {
+          try {
+            const u = await apiBlobUrl(f.url);
+            map[f.url] = u;
+            revoke.push(u);
+          } catch { /* skip */ }
+        }
+        if (alive) setUrls(map);
+      })
+      .catch(() => setFiles([]));
+    return () => {
+      alive = false;
+      revoke.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [id]);
+
+  if (status === "failed") {
+    return (
+      <div className="mt-2">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-paper/40">Error</div>
+        <pre className="mt-1 text-xs whitespace-pre-wrap break-words font-mono text-signal">{(result || "failed").slice(0, 800)}</pre>
+      </div>
+    );
+  }
+  if (files === null) return <p className="text-paper/40 text-sm mt-3">loading output…</p>;
+  if (files.length === 0)
+    return (
+      <p className="text-paper/50 text-sm mt-3">
+        No previewable file here — the output may live on your Mac or in Photos. (Cloud preview needs the worker to upload it.)
+      </p>
+    );
+
+  return (
+    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {files.map((f) => (
+        <div key={f.url} className="bg-ink border border-edge rounded-lg p-2">
+          {urls[f.url] ? (
+            f.kind === "video" ? (
+              <video controls src={urls[f.url]} className="w-full rounded" />
+            ) : (
+              <img src={urls[f.url]} alt={f.name} className="w-full rounded" />
+            )
+          ) : (
+            <div className="aspect-video grid place-items-center text-paper/30 text-xs font-mono">loading…</div>
+          )}
+          <div className="font-mono text-[10px] text-paper/40 mt-1 truncate">{f.name}</div>
+        </div>
+      ))}
     </div>
   );
 }

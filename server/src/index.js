@@ -523,6 +523,56 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { execFile as _execFile } from "node:child_process";
 const __dirname2 = path.dirname(fileURLToPath(import.meta.url));
+
+// ── serve generated output (videos/images) so the dashboard can play them ────
+const MEDIA_ROOTS = [
+  path.resolve(__dirname2, "..", "..", "output"), // tedca-os/output
+  path.resolve(process.env.DATA_DIR || path.join(__dirname2, "..", "data"), "output"),
+  path.resolve(__dirname2, "..", "..", ".tmp"),
+];
+const withinRoots = (abs) => MEDIA_ROOTS.some((r) => abs === r || abs.startsWith(r + path.sep));
+const MEDIA_KIND = {
+  ".mp4": "video", ".mov": "video", ".webm": "video", ".m4v": "video",
+  ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image", ".gif": "image",
+};
+
+// stream a generated file (path-traversal guarded to the output roots only)
+app.get("/api/file", requireUser, (req, res) => {
+  const abs = path.resolve(String(req.query.p || ""));
+  if (!withinRoots(abs)) return res.status(403).json({ error: "forbidden" });
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return res.status(404).json({ error: "not found" });
+  res.sendFile(abs); // express handles Range requests → video seeking works
+});
+
+// the playable artifacts a job produced (parsed out of its result JSON)
+app.get("/api/jobs/:id/media", requireUser, (req, res) => {
+  const job = db.prepare("SELECT result FROM jobs WHERE id=?").get(req.params.id);
+  if (!job) return res.status(404).json({ error: "not found" });
+  let r = {};
+  try { r = JSON.parse(job.result || "{}"); } catch { /* not json */ }
+  const cands = [];
+  for (const k of ["path", "post_html", "mp4", "video"]) if (typeof r[k] === "string") cands.push(r[k]);
+  for (const k of ["live", "files", "slides", "outputs", "images"]) if (Array.isArray(r[k])) cands.push(...r[k].filter((x) => typeof x === "string"));
+  for (const k of ["outDir", "outdir", "dir"]) {
+    const d = r[k];
+    if (typeof d === "string") {
+      try { if (fs.statSync(d).isDirectory()) for (const f of fs.readdirSync(d)) cands.push(path.join(d, f)); } catch { /* gone */ }
+    }
+  }
+  const seen = new Set(), files = [];
+  for (const c of cands) {
+    try {
+      const abs = path.resolve(c);
+      if (seen.has(abs) || !withinRoots(abs) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
+      const kind = MEDIA_KIND[path.extname(abs).toLowerCase()];
+      if (!kind) continue;
+      seen.add(abs);
+      files.push({ name: path.basename(abs), kind, url: "/api/file?p=" + encodeURIComponent(abs) });
+    } catch { /* skip */ }
+  }
+  res.json({ files });
+});
+
 const distDir = process.env.APP_DIST || path.join(__dirname2, "..", "..", "app", "dist");
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));

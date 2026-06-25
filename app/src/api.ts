@@ -32,6 +32,15 @@ export async function api(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
+// fetch a protected binary (video/image) with auth and return a playable object URL
+export async function apiBlobUrl(path: string): Promise<string> {
+  const res = await fetch(API_BASE + path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`${path} → ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
 export async function login(password: string) {
   const res = await fetch(API_BASE + "/api/login", {
     method: "POST",
