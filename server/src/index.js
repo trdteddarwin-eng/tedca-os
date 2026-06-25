@@ -8,7 +8,7 @@ import { smtpInboxMeta, importSmtpInboxes } from "./smtp.js";
 import { sendingInboxes, sendVia } from "./pool.js";
 import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, startDailyReportLoop, getSetting } from "./engine.js";
 import { startReplyLoop, bindReplyLogger } from "./replies.js";
-import { telegramConfigured, sendTelegramFile } from "./telegram.js";
+import { telegramConfigured, sendTelegramFile, sendTelegram } from "./telegram.js";
 import { elevenConfigured, generateVoice } from "./elevenlabs.js";
 import {
   bindSkillLogger,
@@ -426,6 +426,19 @@ app.post("/api/worker/jobs/:id/complete", requireWorker, (req, res) => {
     typeof result === "string" ? result : JSON.stringify(result ?? null),
     req.params.id
   );
+  // Reliable server-side notification — the Mac worker's own Telegram call can silently miss.
+  try {
+    const LABELS = {
+      agentos_post_revise: "Post re-render", motion_graphic: "Motion graphic", video_edit: "Video edit",
+      agentos_post: "AgentOS post", edu_post: "Educational post", livephoto: "Live Photo", carousel: "Carousel",
+    };
+    const job = db.prepare("SELECT type FROM jobs WHERE id=?").get(req.params.id);
+    const label = LABELS[job?.type];
+    if (label) {
+      const base = process.env.PUBLIC_URL || "https://tedca-os-production.up.railway.app";
+      sendTelegram(ok ? `✅ ${label} is done — view & play it in Jobs:\n${base}/jobs` : `❌ ${label} failed. Check Jobs:\n${base}/jobs`).catch(() => {});
+    }
+  } catch { /* never block completion on a notify error */ }
   res.json({ ok: true });
 });
 
