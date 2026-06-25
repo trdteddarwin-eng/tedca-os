@@ -525,10 +525,14 @@ import { execFile as _execFile } from "node:child_process";
 const __dirname2 = path.dirname(fileURLToPath(import.meta.url));
 
 // ── serve generated output (videos/images) so the dashboard can play them ────
+const WORKSPACE = path.resolve(__dirname2, "..", "..", ".."); // Ted Workspace root
 const MEDIA_ROOTS = [
   path.resolve(__dirname2, "..", "..", "output"), // tedca-os/output
   path.resolve(process.env.DATA_DIR || path.join(__dirname2, "..", "data"), "output"),
   path.resolve(__dirname2, "..", "..", ".tmp"),
+  path.join(WORKSPACE, "agentos", "posts"), // AgentOS post slides (.mp4)
+  path.join(WORKSPACE, "tiktok-livephoto", "runs"), // Live Photo .mov pairs
+  path.join(WORKSPACE, ".tmp"),
 ];
 const withinRoots = (abs) => MEDIA_ROOTS.some((r) => abs === r || abs.startsWith(r + path.sep));
 const MEDIA_KIND = {
@@ -553,7 +557,7 @@ app.get("/api/jobs/:id/media", requireUser, (req, res) => {
   const cands = [];
   for (const k of ["path", "post_html", "mp4", "video"]) if (typeof r[k] === "string") cands.push(r[k]);
   for (const k of ["live", "files", "slides", "outputs", "images"]) if (Array.isArray(r[k])) cands.push(...r[k].filter((x) => typeof x === "string"));
-  for (const k of ["outDir", "outdir", "dir"]) {
+  for (const k of ["outDir", "outdir", "dir", "folder"]) {
     const d = r[k];
     if (typeof d === "string") {
       try { if (fs.statSync(d).isDirectory()) for (const f of fs.readdirSync(d)) cands.push(path.join(d, f)); } catch { /* gone */ }
