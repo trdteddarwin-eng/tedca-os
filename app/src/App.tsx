@@ -12,6 +12,7 @@ import Inboxes from "./pages/Inboxes";
 import Skills from "./pages/Skills";
 import Emails from "./pages/Emails";
 import Jobs from "./pages/Jobs";
+import PostEditor from "./pages/PostEditor";
 import AgentOS from "./pages/AgentOS";
 import ClipEditor from "./pages/ClipEditor";
 
@@ -122,6 +123,7 @@ export default function App() {
           <Route path="/agentos" element={<AgentOS />} />
           <Route path="/emails" element={<Emails />} />
           <Route path="/jobs" element={<Jobs />} />
+          <Route path="/post-editor" element={<PostEditor />} />
           <Route path="/brain" element={<Brain />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

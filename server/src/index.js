@@ -574,7 +574,55 @@ app.get("/api/jobs/:id/media", requireUser, (req, res) => {
       files.push({ name: path.basename(abs), kind, path: abs, url: "/api/file?p=" + encodeURIComponent(abs) });
     } catch { /* skip */ }
   }
-  res.json({ files });
+  res.json({ files, folder: r.folder || r.outDir || r.outdir || null });
+});
+
+// ── Post Editor: preview copy changes (cheap), then render the new slides ─────
+async function llmPostPreview(creative, notes) {
+  const key = process.env.OPENROUTER_API_KEY || "";
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "anthropic/claude-sonnet-4.5",
+      max_tokens: 900,
+      messages: [
+        {
+          role: "user",
+          content: `Here is the copy JSON for a multi-slide Instagram carousel:\n"""${JSON.stringify(creative)}"""\n\nThe user wants these changes:\n${notes}\n\nApply ONLY the requested changes, keeping the same punchy style and staying truthful. Output ONLY JSON:\n{"slides":[{"n":1,"text":"the new visible text for slide 1, plain"}, ...]} — one entry per slide showing exactly the new wording.`,
+        },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`preview LLM failed: ${res.status}`);
+  let txt = ((await res.json()).choices?.[0]?.message?.content || "{}").trim().replace(/^```json\s*|\s*```$/g, "");
+  try { return JSON.parse(txt).slides || []; } catch { return []; }
+}
+
+// show what the copy will become — no render yet
+app.post("/api/posts/preview", requireUser, async (req, res) => {
+  const { folder, notes } = req.body || {};
+  if (!folder) return res.status(400).json({ error: "folder required" });
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(path.resolve(folder), "meta.json"), "utf8"));
+    const noteLines = [
+      notes?.overall ? `Overall: ${notes.overall}` : "",
+      ...Object.entries(notes?.slides || {}).filter(([, v]) => v && v.trim()).map(([k, v]) => `Slide ${k}: ${v}`),
+    ].filter(Boolean).join("\n");
+    if (!noteLines.trim()) return res.json({ slides: [], note: "no changes entered" });
+    res.json({ slides: await llmPostPreview(meta.creative || meta, noteLines) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// render the new version (Mac worker agent applies copy + re-renders the slides)
+app.post("/api/posts/revise", requireUser, (req, res) => {
+  const { folder, notes } = req.body || {};
+  if (!folder) return res.status(400).json({ error: "folder required" });
+  const info = db.prepare("INSERT INTO jobs (type, params, status) VALUES ('agentos_post_revise', ?, 'queued')").run(JSON.stringify({ folder, notes }));
+  logEvent({ actor: "research", message: `Post Editor: queued a re-render of ${path.basename(folder)} with your changes.`, level: "info" });
+  res.json({ job_id: Number(info.lastInsertRowid) });
 });
 
 const distDir = process.env.APP_DIST || path.join(__dirname2, "..", "..", "app", "dist");

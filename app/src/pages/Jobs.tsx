@@ -111,7 +111,7 @@ export default function Jobs() {
                     <div>started<br /><span className="text-paper/80">{when(j.claimed_at)}</span></div>
                     <div>finished<br /><span className="text-paper/80">{when(j.finished_at)}</span></div>
                   </div>
-                  <JobMedia id={j.id} status={j.status} result={j.result} />
+                  <JobMedia id={j.id} type={j.type} status={j.status} result={j.result} />
                 </div>
               )}
             </div>
@@ -123,10 +123,11 @@ export default function Jobs() {
 }
 
 // Renders the actual generated output — playable video / image preview — not JSON.
-function JobMedia({ id, status, result }: { id: number; status: string; result: string | null }) {
+function JobMedia({ id, type, status, result }: { id: number; type: string; status: string; result: string | null }) {
   const navigate = useNavigate();
   const [files, setFiles] = useState<{ name: string; kind: string; path: string; url: string }[] | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const [folder, setFolder] = useState<string | null>(null);
 
   useEffect(() => {
     let revoke: string[] = [];
@@ -135,6 +136,7 @@ function JobMedia({ id, status, result }: { id: number; status: string; result: 
       .then(async (d) => {
         if (!alive) return;
         setFiles(d.files);
+        setFolder(d.folder || null);
         const map: Record<string, string> = {};
         for (const f of (d.files || []).slice(0, 8)) {
           try {
@@ -168,34 +170,47 @@ function JobMedia({ id, status, result }: { id: number; status: string; result: 
       </p>
     );
 
+  const videoCount = files.filter((f) => f.kind === "video").length;
+  const isPost = ["agentos_post", "edu_post"].includes(type) || videoCount > 1;
+
   return (
-    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {files.map((f) => (
-        <div key={f.url} className="bg-ink border border-edge rounded-lg p-2">
-          {urls[f.url] ? (
-            f.kind === "video" ? (
-              <video controls src={urls[f.url]} className="w-full rounded" />
+    <div className="mt-3">
+      {isPost && folder && (
+        <button
+          onClick={() => navigate("/post-editor", { state: { jobId: id, folder } })}
+          className="mb-3 font-mono text-[11px] uppercase tracking-widest bg-signal text-paper rounded px-3 py-2 hover:opacity-90"
+        >
+          ✎ Edit post ({videoCount} slide{videoCount === 1 ? "" : "s"})
+        </button>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {files.map((f) => (
+          <div key={f.url} className="bg-ink border border-edge rounded-lg p-2">
+            {urls[f.url] ? (
+              f.kind === "video" ? (
+                <video controls src={urls[f.url]} className="w-full rounded" />
+              ) : (
+                <img src={urls[f.url]} alt={f.name} className="w-full rounded" />
+              )
             ) : (
-              <img src={urls[f.url]} alt={f.name} className="w-full rounded" />
-            )
-          ) : (
-            <div className="aspect-video grid place-items-center text-paper/30 text-xs font-mono">loading…</div>
-          )}
-          <div className="flex items-center justify-between gap-2 mt-1">
-            <span className="font-mono text-[10px] text-paper/40 truncate">{f.name}</span>
-            {f.kind === "video" && (
-              <button
-                onClick={() =>
-                  navigate("/editor", { state: { sourcePath: f.path, existing: true, styleName: "edit" } })
-                }
-                className="font-mono text-[10px] uppercase tracking-widest bg-signal text-paper rounded px-2.5 py-1 hover:opacity-90 whitespace-nowrap"
-              >
-                ✎ Edit
-              </button>
+              <div className="aspect-video grid place-items-center text-paper/30 text-xs font-mono">loading…</div>
             )}
+            <div className="flex items-center justify-between gap-2 mt-1">
+              <span className="font-mono text-[10px] text-paper/40 truncate">{f.name}</span>
+              {f.kind === "video" && !isPost && (
+                <button
+                  onClick={() =>
+                    navigate("/editor", { state: { sourcePath: f.path, existing: true, styleName: "edit" } })
+                  }
+                  className="font-mono text-[10px] uppercase tracking-widest bg-signal text-paper rounded px-2.5 py-1 hover:opacity-90 whitespace-nowrap"
+                >
+                  ✎ Edit
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

@@ -163,6 +163,35 @@ function runClaudeAgent(prompt, timeoutMs) {
   });
 }
 
+async function handleAgentosPostRevise(job) {
+  const { folder, notes } = job.params;
+  const base = path.basename(folder || "post");
+  const noteText = [
+    notes?.overall ? `Overall: ${notes.overall}` : "",
+    ...Object.entries(notes?.slides || {}).filter(([, v]) => v && String(v).trim()).map(([k, v]) => `Slide ${k}: ${v}`),
+  ].filter(Boolean).join("\n");
+  await postEvent({ run_id: job.run_id, actor: "research", level: "info", message: `Mac worker: revising the post "${base}" with your notes…` });
+  await sendTelegramText(`✏️ Revising post "${base}" — applying your slide changes and re-rendering.`);
+
+  const prompt = [
+    `You are revising an existing AgentOS Instagram carousel post (DO NOT make a new one).`,
+    `Post folder: ${folder}`,
+    `It contains meta.json (the copy), slide_01.html … slide_NN.html (slide source), and slide_NN.mp4 (rendered output).`,
+    `The user wants these changes — apply ONLY what is asked, leave every other slide untouched:`,
+    noteText,
+    `Steps: (1) update meta.json's copy for the affected slides; (2) edit the matching slide_NN.html to reflect the new copy — change ONLY the text, keep ALL animation/GSAP/layout/styling and the window.__seek(ms) contract exactly intact; (3) re-render each changed slide to its slide_NN.mp4 with: node ${WORKSPACE}/execution/render_demo_posts.mjs <abs out .mp4> <abs slide .html> 120 30`,
+    `When finished, output ONLY this JSON on the final line: {"folder":"${folder}","slides":["<abs path to every slide_NN.mp4 in order>"]}`,
+  ].join("\n\n");
+
+  const out = await runClaudeAgent(prompt, 30 * 60 * 1000);
+  let result = { folder, slides: [] };
+  const m = out.match(/\{[\s\S]*"slides"[\s\S]*\}/);
+  if (m) { try { result = JSON.parse(m[0]); } catch { /* keep default */ } }
+  await postEvent({ run_id: job.run_id, actor: "research", level: "success", message: `Post "${base}" revised and re-rendered.` });
+  await sendTelegramText(`✅ Post "${base}" re-rendered with your changes.`);
+  return result;
+}
+
 async function handleMotionGraphic(job) {
   const { topic } = job.params;
   const fs = await import("node:fs");
@@ -535,12 +564,13 @@ async function pollJobs() {
       else if (job.type === "motion_graphic") result = await handleMotionGraphic(job);
       else if (job.type === "video_edit") result = await handleVideoEdit(job);
       else if (job.type === "edu_post") result = await handleEduPost(job);
+      else if (job.type === "agentos_post_revise") result = await handleAgentosPostRevise(job);
       else throw new Error(`unknown job type ${job.type}`);
       await completeJob(job.id, true, result);
     } catch (e) {
       console.error(`job #${job.id} failed:`, e.message);
       await postEvent({ run_id: job.run_id, actor: "agentos", message: `Mac worker job failed: ${e.message}`, level: "error" });
-      if (["livephoto", "carousel", "tts", "agentos_post", "agentos_new_skill", "agentos_wire", "motion_graphic", "video_edit", "edu_post"].includes(job.type)) {
+      if (["livephoto", "carousel", "tts", "agentos_post", "agentos_new_skill", "agentos_wire", "motion_graphic", "video_edit", "edu_post", "agentos_post_revise"].includes(job.type)) {
         await sendTelegramText(`❌ The ${job.type} job hit a problem: ${e.message.slice(0, 300)}`);
       }
       await completeJob(job.id, false, e.message);
