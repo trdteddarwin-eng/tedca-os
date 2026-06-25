@@ -308,7 +308,7 @@ async function sendFromQueue(runId, queue, isProducing, target) {
   while (sent < target) {
     // stop cleanly when business hours close — don't bleed sends into the evening
     if (!withinSendWindow()) {
-      log("Business hours are over (Mon–Fri 9–17) — banking the rest for tomorrow.", "warn");
+      log("Business hours are over (Mon–Fri 8–17 ET) — banking the rest for tomorrow.", "warn");
       break;
     }
     if (!queue.length) {

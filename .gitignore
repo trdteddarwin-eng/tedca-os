@@ -24,3 +24,5 @@ obsidian-crm-structure.html
 # parent repo ignores all package.json — re-include ours (Railway needs them)
 !package.json
 !**/package.json
+
+system-overview.html

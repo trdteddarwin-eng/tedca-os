@@ -11,12 +11,14 @@ import Brain from "./pages/Brain";
 import Inboxes from "./pages/Inboxes";
 import Skills from "./pages/Skills";
 import Emails from "./pages/Emails";
+import Jobs from "./pages/Jobs";
 import AgentOS from "./pages/AgentOS";
 import ClipEditor from "./pages/ClipEditor";
 
 const NAV = [
   { to: "/", label: "Home" },
   { to: "/activity", label: "Live Activity" },
+  { to: "/jobs", label: "Jobs / History" },
   { to: "/crm", label: "Clients / CRM" },
   { to: "/pipeline", label: "Pipeline" },
   { to: "/projects", label: "Projects" },
@@ -119,6 +121,7 @@ export default function App() {
           <Route path="/editor" element={<ClipEditor />} />
           <Route path="/agentos" element={<AgentOS />} />
           <Route path="/emails" element={<Emails />} />
+          <Route path="/jobs" element={<Jobs />} />
           <Route path="/brain" element={<Brain />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

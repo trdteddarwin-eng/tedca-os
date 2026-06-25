@@ -293,6 +293,17 @@ app.post("/api/smtp/import-inboxes", requireUser, (req, res) => {
   res.json({ ok: true, count });
 });
 
+// Job history — every skill/scrape job with status + result (the "scoreboard")
+app.get("/api/jobs", requireUser, (req, res) => {
+  res.json(
+    db
+      .prepare(
+        "SELECT id, run_id, type, params, status, result, created_at, claimed_at, finished_at FROM jobs ORDER BY id DESC LIMIT 200"
+      )
+      .all()
+  );
+});
+
 app.get("/api/runs", requireUser, (req, res) => {
   res.json(db.prepare("SELECT * FROM runs ORDER BY id DESC LIMIT 100").all());
 });
