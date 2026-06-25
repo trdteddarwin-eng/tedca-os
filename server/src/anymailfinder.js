@@ -1,54 +1,22 @@
-// AnyMailFinder: find + verify the decision-maker email for a domain.
-// Only "valid" results are kept (their validation IS our verification).
+// AnyMailFinder v5.1: find + verify the decision-maker email for a company, and
+// capture the LinkedIn URL + job title + name returned in the SAME call (no extra
+// credits). Only "valid" emails are kept for sending — their validation is our
+// bounce protection — but enrichment is saved even for risky/unsent leads.
 
-const API = "https://api.anymailfinder.com/v5.0/search/decision-maker.json";
-const COMPANY_API = "https://api.anymailfinder.com/v5.0/search/company.json";
-
-// Local businesses rarely have an indexed "CEO" — fall back to any validated
-// email at the domain. Prefer personal-looking addresses over generic ones.
-const GENERIC = /^(info|contact|hello|office|admin|support|sales|booking|appointments|frontdesk|team)@/i;
-
-async function findCompanyEmail(domain, key) {
-  const res = await fetch(COMPANY_API, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ domain }),
-  });
-  if (res.status === 402) return { ok: false, status: "no_credits" };
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.success) return { ok: false, status: "not_found", raw: data };
-  const emails = data.results?.emails || [];
-  if (!emails.length) return { ok: false, status: "not_found", raw: data };
-  const validation = String(data.results?.validation || "unknown").toLowerCase();
-  const pick = emails.find((e) => !GENERIC.test(e)) || emails[0];
-  return {
-    ok: validation === "valid" || validation === "verified",
-    email: pick,
-    status: validation,
-    name: null,
-    raw: data,
-  };
-}
+const DM_API = "https://api.anymailfinder.com/v5.1/find-email/decision-maker";
+const COMPANY_API = "https://api.anymailfinder.com/v5.1/find-email/company";
 
 export function amfConfigured() {
   return Boolean(process.env.ANYMAILFINDER_API_KEY);
 }
 
-// Returns { ok, email, status, name, raw } — ok only when status is valid.
-export async function findCeo({ domain, companyName }) {
-  const key = process.env.ANYMAILFINDER_API_KEY || "";
-  if (!key) throw new Error("ANYMAILFINDER_API_KEY missing in .env");
-
-  const res = await fetch(API, {
+async function post(url, body, key) {
+  const res = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...(domain ? { domain } : {}),
-      ...(companyName ? { company_name: companyName } : {}),
-      decision_maker_category: "ceo",
-    }),
+    body: JSON.stringify(body),
   });
-
+  if (res.status === 402) return { noCredits: true };
   const text = await res.text();
   let data;
   try {
@@ -56,28 +24,46 @@ export async function findCeo({ domain, companyName }) {
   } catch {
     throw new Error(`AnyMailFinder returned non-JSON (${res.status}): ${text.slice(0, 200)}`);
   }
+  return { res, data };
+}
 
-  if (res.status === 402) return { ok: false, status: "no_credits", raw: data };
-  if (res.status === 404 || data?.success === false) {
-    // no indexed decision-maker — fall back to any validated email at the domain
-    if (domain) return findCompanyEmail(domain, key);
-    return { ok: false, status: "not_found", raw: data };
-  }
-  if (!res.ok) throw new Error(`AnyMailFinder error ${res.status}: ${text.slice(0, 200)}`);
-
-  // Field shapes vary by plan/version — check defensively.
-  const results = data.results || data;
-  const email = results.email || (Array.isArray(results.emails) ? results.emails[0] : null);
-  const validation = results.validation || results.email_status || data.validation || "unknown";
-  const name = results.person_full_name || results.full_name || null;
-
-  if (!email || typeof email !== "string") return { ok: false, status: "not_found", raw: data };
-  const status = String(validation).toLowerCase();
+// normalize a v5.1 response into our internal shape
+function normalize(d = {}) {
+  const status = String(d.email_status || "unknown").toLowerCase();
+  const email = d.valid_email || d.email || (Array.isArray(d.emails) ? d.emails[0] : null);
   return {
-    ok: status === "valid" || status === "verified",
-    email,
+    ok: status === "valid" && Boolean(email), // only valid emails are safe to send
+    email: email || null,
     status,
-    name,
-    raw: data,
+    name: d.person_full_name || null,
+    title: d.person_job_title || null,
+    linkedin: d.person_linkedin_url || null,
+    raw: d,
   };
+}
+
+// Returns { ok, email, status, name, title, linkedin, raw }.
+export async function findCeo({ domain, companyName }) {
+  const key = process.env.ANYMAILFINDER_API_KEY || "";
+  if (!key) throw new Error("ANYMAILFINDER_API_KEY missing in .env");
+
+  // 1. decision-maker (CEO) — returns email + LinkedIn + title in one shot
+  const r = await post(DM_API, {
+    ...(domain ? { domain } : {}),
+    ...(companyName ? { company_name: companyName } : {}),
+    decision_maker_category: ["ceo"],
+  }, key);
+  if (r.noCredits) return { ok: false, status: "no_credits" };
+
+  const out = normalize(r.data);
+  if (out.email) return out; // found a person-level email (valid → send; risky → enrich only)
+
+  // 2. fallback: any validated email at the domain (small biz with no indexed CEO)
+  if (domain) {
+    const c = await post(COMPANY_API, { domain }, key);
+    if (c.noCredits) return { ok: false, status: "no_credits" };
+    const cOut = normalize(c.data);
+    if (cOut.email) return cOut;
+  }
+  return { ok: false, status: out.status || "not_found", raw: r.data };
 }

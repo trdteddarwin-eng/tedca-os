@@ -77,15 +77,16 @@ async function executeRun(runId, { target, searchQuery }) {
         return "stop";
       }
       if (r.ok) {
-        db.prepare("UPDATE leads SET email=?, email_status='valid', ceo_name=COALESCE(?, ceo_name) WHERE id=?").run(
-          r.email,
-          r.name,
-          id
-        );
-        log("verify", `${lead.business_name}: found the owner — ${r.email} (confirmed real).`, "success");
+        db.prepare(
+          "UPDATE leads SET email=?, email_status='valid', ceo_name=COALESCE(?, ceo_name), contact_title=COALESCE(?, contact_title), linkedin_url=COALESCE(?, linkedin_url) WHERE id=?"
+        ).run(r.email, r.name, r.title, r.linkedin, id);
+        log("verify", `${lead.business_name}: found the owner — ${r.email}${r.name ? ` (${r.name})` : ""}${r.linkedin ? " + LinkedIn" : ""}.`, "success");
         return true;
       }
-      db.prepare("UPDATE leads SET email_status=? WHERE id=?").run(r.status || "unknown", id);
+      // not valid — still keep any name/title/LinkedIn AMF returned, for the CRM
+      db.prepare(
+        "UPDATE leads SET email_status=?, ceo_name=COALESCE(?, ceo_name), contact_title=COALESCE(?, contact_title), linkedin_url=COALESCE(?, linkedin_url) WHERE id=?"
+      ).run(r.status || "unknown", r.name, r.title, r.linkedin, id);
       log("verify", `${lead.business_name}: could not find a safe owner email — skipping so we never bounce.`, "info");
       return false;
     } catch (e) {
