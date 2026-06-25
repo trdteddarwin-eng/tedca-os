@@ -22,6 +22,18 @@ export default function PostEditor() {
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const [renderStatus, setRenderStatus] = useState("");
+  const [tg, setTg] = useState<Record<number, string>>({});
+
+  async function sendSlide(n: number, p: string) {
+    setTg((s) => ({ ...s, [n]: "sending" }));
+    try {
+      const r = await api("/api/telegram/send-file", { method: "POST", body: JSON.stringify({ path: p, caption: `Slide ${n}` }) });
+      setTg((s) => ({ ...s, [n]: r.ok ? "sent ✓" : "failed" }));
+    } catch {
+      setTg((s) => ({ ...s, [n]: "failed" }));
+    }
+    setTimeout(() => setTg((s) => ({ ...s, [n]: "" })), 2500);
+  }
 
   async function loadSlides() {
     if (!jobId) return;
@@ -109,6 +121,13 @@ export default function PostEditor() {
                 placeholder={`change slide ${n}…`}
                 className="w-full mt-2 bg-ink border border-edge rounded px-2.5 py-1.5 text-xs text-paper placeholder:text-paper/30"
               />
+              <button
+                onClick={() => sendSlide(n, s.path)}
+                disabled={tg[n] === "sending"}
+                className="mt-2 w-full font-mono text-[10px] uppercase tracking-widest border border-edge text-paper/70 rounded px-2.5 py-1.5 hover:text-paper hover:border-paper/30 disabled:opacity-40"
+              >
+                {tg[n] ? tg[n] : "↗ Send this slide to Telegram"}
+              </button>
               {prop && (
                 <div className="mt-2 bg-ink border border-emerald-400/30 rounded p-2">
                   <div className="font-mono text-[9px] uppercase tracking-widest text-emerald-400/80">proposed</div>

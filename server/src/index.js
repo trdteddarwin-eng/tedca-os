@@ -629,6 +629,22 @@ app.post("/api/posts/preview", requireUser, async (req, res) => {
   }
 });
 
+// send one generated file (e.g. a single slide) to Telegram on demand
+app.post("/api/telegram/send-file", requireUser, async (req, res) => {
+  const abs = path.resolve(String((req.body || {}).path || ""));
+  if (!withinRoots(abs)) return res.status(403).json({ error: "forbidden" });
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return res.status(404).json({ error: "not found" });
+  const ext = path.extname(abs).toLowerCase();
+  const kind = [".mp4", ".mov", ".m4v", ".webm"].includes(ext) ? "video"
+    : [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext) ? "photo" : "document";
+  try {
+    const ok = await sendTelegramFile(fs.readFileSync(abs), path.basename(abs), (req.body || {}).caption || "", kind);
+    res.json({ ok });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // render the new version (Mac worker agent applies copy + re-renders the slides)
 app.post("/api/posts/revise", requireUser, (req, res) => {
   const { folder, notes } = req.body || {};
