@@ -6,6 +6,8 @@ import { sendTelegram } from "./telegram.js";
 import { sendingInboxes, sendVia, isSmtp } from "./pool.js";
 import { smtpInboxCap } from "./smtp.js";
 import { isSuppressed } from "./replies.js";
+import { scrapeGoogleMaps, apifyConfigured } from "./scrape.js";
+import { sendDailyReport } from "./report.js";
 
 let logEvent = () => {};
 export function bindLogger(fn) {
@@ -186,8 +188,15 @@ async function executeRun(runId, { target, searchQuery }) {
   activeRun = null;
 }
 
-// ── scrape via worker job queue ──────────────────────────────────────────────
-function runScrapeJob(runId, params) {
+// ── scrape: cloud-native (Apify direct) with Mac-worker fallback ─────────────
+async function runScrapeJob(runId, params) {
+  // Cloud: call Apify directly so lead-gen runs with the laptop off.
+  if (apifyConfigured()) {
+    logEvent({ run_id: runId, actor: "scrape", message: `Scraping Google Maps in the cloud: "${params.search}" (limit ${params.limit})`, level: "info" });
+    return await scrapeGoogleMaps(params.search, params.limit);
+  }
+
+  // Local fallback: dispatch to the Mac worker via the job queue.
   const info = db
     .prepare("INSERT INTO jobs (run_id, type, params) VALUES (?, 'scrape', ?)")
     .run(runId, JSON.stringify(params));
@@ -395,10 +404,23 @@ async function sendBatch(runId, leadIds, { quiet = false } = {}) {
   return sent;
 }
 
-// ── business hours: Mon–Fri 9:00–17:00 local ────────────────────────────────
+// ── scheduling anchored to Eastern time (NJ), regardless of server clock ─────
+const TZ = "America/New_York";
+function etNow(d = new Date()) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour12: false, weekday: "short", hour: "2-digit" })
+      .formatToParts(d)
+      .map((x) => [x.type, x.value])
+  );
+  const days = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { day: days[p.weekday], hour: Number(p.hour) };
+}
+const etDate = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d); // YYYY-MM-DD
+
+// business hours: Mon–Fri 8:00–17:00 Eastern
 export function withinSendWindow(d = new Date()) {
-  const day = d.getDay(); // 0 Sun … 6 Sat
-  return day >= 1 && day <= 5 && d.getHours() >= 9 && d.getHours() < 17;
+  const { day, hour } = etNow(d);
+  return day >= 1 && day <= 5 && hour >= 8 && hour < 17;
 }
 
 // ── daily auto-run: weekday mornings, once per day ──────────────────────────
@@ -408,16 +430,17 @@ export function startScheduler() {
       if (getSetting("schedule_enabled") !== "1") return;
       if (getSetting("paused") === "1") return;
       const now = new Date();
+      const { hour } = etNow(now);
       if (!withinSendWindow(now)) return;
-      if (now.getHours() !== Number(getSetting("schedule_hour") || 9)) return;
-      const today = now.toISOString().slice(0, 10);
+      if (hour !== Number(getSetting("schedule_hour") || 8)) return;
+      const today = etDate(now);
       if (getSetting("last_auto_run_date") === today) return;
       if (runningRunId()) return;
       db.prepare(
         "INSERT INTO settings (key, value) VALUES ('last_auto_run_date', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
       ).run(today);
       const target = Number(getSetting("daily_target") || 100);
-      logEvent({ actor: "system", message: `It's ${now.getHours()}:00 on a weekday — starting today's automatic run (target ${target}).`, level: "info" });
+      logEvent({ actor: "system", message: `It's ${hour}:00 ET on a weekday — starting today's automatic run (target ${target}).`, level: "info" });
       startMorningRun({ target, query: null });
     } catch (e) {
       logEvent({ actor: "system", message: `Auto-run scheduler error: ${e.message}`, level: "error" });
@@ -457,6 +480,27 @@ export function startFollowupLoop() {
       } catch (e) {
         logEvent({ actor: "send", message: `Follow-up to ${lead.business_name} did not go through: ${e.message}`, level: "error" });
       }
+    }
+  }, 60_000);
+}
+
+// ── end-of-day report: 17:00 ET on weekdays, once/day → PDF to Telegram ───────
+export function startDailyReportLoop() {
+  setInterval(async () => {
+    try {
+      const { day, hour } = etNow();
+      if (day < 1 || day > 5) return; // weekdays only
+      if (hour !== 17) return; // 5:00 PM ET
+      const today = etDate();
+      if (getSetting("last_report_date") === today) return;
+      db.prepare(
+        "INSERT INTO settings (key, value) VALUES ('last_report_date', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+      ).run(today);
+      logEvent({ actor: "system", message: "End of day — building today's email report and sending it to Telegram.", level: "info" });
+      const ok = await sendDailyReport();
+      logEvent({ actor: "system", message: ok ? "📊 Daily report sent to Telegram." : "Couldn't send the daily report (check Telegram config).", level: ok ? "success" : "warn" });
+    } catch (e) {
+      logEvent({ actor: "system", message: `Daily report error: ${e.message}`, level: "error" });
     }
   }, 60_000);
 }

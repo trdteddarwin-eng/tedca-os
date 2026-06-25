@@ -6,7 +6,7 @@ import { db } from "./db.js";
 import { gmailConfigured, authorizedInboxes, startAuth, sendEmail, importTokens } from "./gmail.js";
 import { smtpInboxMeta, importSmtpInboxes } from "./smtp.js";
 import { sendingInboxes, sendVia } from "./pool.js";
-import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, getSetting } from "./engine.js";
+import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, startDailyReportLoop, getSetting } from "./engine.js";
 import { startReplyLoop, bindReplyLogger } from "./replies.js";
 import { telegramConfigured, sendTelegramFile } from "./telegram.js";
 import { elevenConfigured, generateVoice } from "./elevenlabs.js";
@@ -848,6 +848,7 @@ bindReplyLogger(logEvent);
 startFollowupLoop();
 startScheduler();
 startReplyLoop();
+startDailyReportLoop();
 if (!telegramConfigured()) {
   console.warn("Telegram not configured — notifications will be skipped.");
 }
