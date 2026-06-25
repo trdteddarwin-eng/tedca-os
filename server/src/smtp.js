@@ -44,6 +44,11 @@ export function isSmtpInbox(email) {
   return Boolean(load()[String(email).toLowerCase()]);
 }
 
+// the persona first name for an inbox (used to sign emails as the actual sender)
+export function smtpFirstName(email) {
+  return load()[String(email).toLowerCase()]?.firstName || null;
+}
+
 // IMAP connection config for an inbox (used by the reply reader). null if unknown.
 export function imapConfig(email) {
   const rec = load()[String(email).toLowerCase()];

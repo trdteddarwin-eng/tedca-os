@@ -4,7 +4,7 @@ import { db } from "./db.js";
 import { findCeo, amfConfigured } from "./anymailfinder.js";
 import { sendTelegram } from "./telegram.js";
 import { sendingInboxes, sendVia, isSmtp } from "./pool.js";
-import { smtpInboxCap } from "./smtp.js";
+import { smtpInboxCap, smtpFirstName } from "./smtp.js";
 import { isSuppressed } from "./replies.js";
 import { scrapeGoogleMaps, apifyConfigured } from "./scrape.js";
 import { sendDailyReport } from "./report.js";
@@ -262,7 +262,7 @@ function ingestLeads(items, source) {
 }
 
 // ── sender: caps, rotation, jitter, test mode ────────────────────────────────
-function fillTemplate(tpl, lead) {
+function fillTemplate(tpl, lead, senderName = "Ted") {
   const first = (lead.ceo_name || "").split(" ")[0] || "there";
   // callback replacers avoid $-pattern expansion ($&, $$, …) from lead text;
   // clean() strips CR/LF so a scraped name can't inject email headers.
@@ -272,7 +272,17 @@ function fillTemplate(tpl, lead) {
     .replaceAll("{first_name}", () => clean(first))
     .replaceAll("{category}", () => clean(lead.category || "business"))
     .replaceAll("{rating}", () => (lead.rating != null ? String(lead.rating) : "great"))
-    .replaceAll("{review_count}", () => (lead.review_count != null ? String(lead.review_count) : "many"));
+    .replaceAll("{review_count}", () => (lead.review_count != null ? String(lead.review_count) : "many"))
+    .replaceAll("{sender_name}", () => clean(senderName));
+}
+
+// who the email is signed as — the sending inbox's persona (April, Brandon, …),
+// falling back to a capitalized local-part so it always matches the From name.
+function senderNameFor(inbox) {
+  const n = smtpFirstName(inbox);
+  if (n) return n;
+  const local = String(inbox || "").split("@")[0].replace(/[._-]+/g, " ").split(" ")[0];
+  return local ? local.charAt(0).toUpperCase() + local.slice(1) : "Ted";
 }
 
 function sentTodayByInbox(inbox) {
@@ -382,8 +392,9 @@ async function sendBatch(runId, leadIds, { quiet = false } = {}) {
       break;
     }
 
-    const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + fillTemplate(subjectTpl, lead);
-    const body = withCompliance(fillTemplate(bodyTpl, lead));
+    const sender = senderNameFor(inbox);
+    const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + fillTemplate(subjectTpl, lead, sender);
+    const body = withCompliance(fillTemplate(bodyTpl, lead, sender));
     const to = testMode ? testRecipient : lead.email;
     try {
       await sendVia({ from: inbox, to, subject, body });
@@ -467,8 +478,9 @@ export function startFollowupLoop() {
       const inbox = lead.inbox_used;
       if (!inbox || sentTodayByInbox(inbox) >= capFor(inbox)) continue;
       if (isSuppressed(lead.email)) continue;
-      const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + `Re: ` + fillTemplate(getSetting("email_subject"), lead);
-      const body = withCompliance(fillTemplate(tpl, lead));
+      const sender = senderNameFor(inbox);
+      const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + `Re: ` + fillTemplate(getSetting("email_subject"), lead, sender);
+      const body = withCompliance(fillTemplate(tpl, lead, sender));
       try {
         await sendVia({ from: inbox, to: testMode ? testRecipient : lead.email, subject, body });
         db.prepare(
