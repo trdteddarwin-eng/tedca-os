@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, apiBlobUrl } from "../api";
 
 type Job = {
@@ -123,7 +124,8 @@ export default function Jobs() {
 
 // Renders the actual generated output — playable video / image preview — not JSON.
 function JobMedia({ id, status, result }: { id: number; status: string; result: string | null }) {
-  const [files, setFiles] = useState<{ name: string; kind: string; url: string }[] | null>(null);
+  const navigate = useNavigate();
+  const [files, setFiles] = useState<{ name: string; kind: string; path: string; url: string }[] | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -179,7 +181,19 @@ function JobMedia({ id, status, result }: { id: number; status: string; result: 
           ) : (
             <div className="aspect-video grid place-items-center text-paper/30 text-xs font-mono">loading…</div>
           )}
-          <div className="font-mono text-[10px] text-paper/40 mt-1 truncate">{f.name}</div>
+          <div className="flex items-center justify-between gap-2 mt-1">
+            <span className="font-mono text-[10px] text-paper/40 truncate">{f.name}</span>
+            {f.kind === "video" && (
+              <button
+                onClick={() =>
+                  navigate("/editor", { state: { sourcePath: f.path, existing: true, styleName: "edit" } })
+                }
+                className="font-mono text-[10px] uppercase tracking-widest bg-signal text-paper rounded px-2.5 py-1 hover:opacity-90 whitespace-nowrap"
+              >
+                ✎ Edit
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>

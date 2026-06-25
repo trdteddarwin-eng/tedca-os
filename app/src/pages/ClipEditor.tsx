@@ -24,6 +24,7 @@ export default function ClipEditor() {
     sourcePath?: string;
     styleId?: string;
     styleName?: string;
+    existing?: boolean; // entered from a finished video (Jobs → Edit)
   };
   const sourcePath = state.sourcePath || "";
   const styleId = state.styleId || "signature";
@@ -80,6 +81,13 @@ export default function ClipEditor() {
     if (!sourcePath) return;
     if (mountedRef.current) return;
     mountedRef.current = true;
+
+    // entered from a finished video (Jobs → Edit): show it as v1, don't re-render
+    if (state.existing) {
+      setVersions([{ n: 1, jobId: 0, status: "done", path: sourcePath }]);
+      setSelectedN(1);
+      return;
+    }
 
     (async () => {
       try {
@@ -187,8 +195,14 @@ export default function ClipEditor() {
               rows={5}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  applyChanges();
+                }
+              }}
               placeholder={
-                'e.g. "cut the intro to 2s", "the riser is too loud", "I like the text-behind part — keep that"'
+                'e.g. "cut the intro to 2s", "the riser is too loud", "make the captions bigger" — then press Enter'
               }
               className="w-full bg-ink border border-edge rounded px-3 py-2.5 font-mono text-xs text-paper placeholder:text-paper/30 leading-relaxed resize-none"
             />

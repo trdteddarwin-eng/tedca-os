@@ -567,7 +567,7 @@ app.get("/api/jobs/:id/media", requireUser, (req, res) => {
       const kind = MEDIA_KIND[path.extname(abs).toLowerCase()];
       if (!kind) continue;
       seen.add(abs);
-      files.push({ name: path.basename(abs), kind, url: "/api/file?p=" + encodeURIComponent(abs) });
+      files.push({ name: path.basename(abs), kind, path: abs, url: "/api/file?p=" + encodeURIComponent(abs) });
     } catch { /* skip */ }
   }
   res.json({ files });
