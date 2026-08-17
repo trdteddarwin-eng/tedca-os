@@ -6,26 +6,70 @@ import { db } from "./db.js";
 import { gmailConfigured, authorizedInboxes, startAuth, sendEmail, importTokens } from "./gmail.js";
 import { smtpInboxMeta, importSmtpInboxes } from "./smtp.js";
 import { sendingInboxes, sendVia } from "./pool.js";
-import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, startDailyReportLoop, getSetting } from "./engine.js";
+import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, startDailyReportLoop, startOwnerHeartbeat, startBounceGuard, getSetting, fillTemplate, senderNameFor } from "./engine.js";
 import { startReplyLoop, bindReplyLogger } from "./replies.js";
+import { startLinkedInLoop, bindLinkedInLogger, generateLinkedInMessage } from "./linkedin.js";
 import { telegramConfigured, sendTelegramFile, sendTelegram } from "./telegram.js";
 import { elevenConfigured, generateVoice } from "./elevenlabs.js";
+import { manychatConfigured, listKeywords, upsertKeyword, deleteKeyword, recentActivity, findDuplicateWarnings, botHealth , markTokenRefreshed } from "./igkeywords.js";
+import { runCrmBackup, startCrmBackupLoop, bindBackupLogger } from "./crmbackup.js";
+import { refreshContent, contentStatus, startContentLoop, bindContentLogger } from "./content.js";
+import { SERVICES, bindKeysLogger, setKeys, maskedInfo, fetchCredits } from "./keys.js";
+import { siteStats, SITES } from "./sitestats.js";
+import {
+  listHotLeads,
+  getThread as hotLeadThread,
+  sendReply as hotLeadSendReply,
+  draftReply as hotLeadDraftReply,
+  bindHotLeadsLogger,
+} from "./hotleads.js";
 import {
   bindSkillLogger,
   avatarVideoScript,
+  personalVideoScript,
+  reviseTedVoice,
+  pvLoad,
+  pvSave,
   suggestLivephotoTopics,
   queueLivephoto,
   markTopicDone,
   queueCarousel,
   queueTts,
   queueMotionGraphic,
+  queueHeygenVideo,
   queueVideoEdit,
+  queueEditVersion,
   editStyles,
   eduPostCopy,
   queueEduPost,
   jobStatus,
   VOICE_AVATAR,
+  VOICE_PERSONAL,
 } from "./skills.js";
+
+// Crash-resistance: a stray async error (an IMAP socket drop, an SMTP hiccup, a
+// failed fetch) must NEVER take down the live sender mid-run. The watchdog can
+// restart a dead process, but it can't resume a killed run — so the day's volume is
+// lost. Log loudly and keep running instead. State-corrupting errors are rare here
+// (these are isolated network/async failures, not DB corruption).
+process.on("uncaughtException", (e) => {
+  // EADDRINUSE = another server already owns the port. Keeping THIS process alive
+  // creates a portless zombie that still runs engine loops and competes for the
+  // send lock (double-send risk — bit us 2026-07-07 and again 2026-07-08). Die fast.
+  if (e?.code === "EADDRINUSE") {
+    console.error("[fatal] port already in use — another server is live; exiting instead of zombieing.");
+    process.exit(0);
+  }
+  console.error("[uncaughtException — kept alive]", e?.stack || e?.message || e);
+  try {
+    db.prepare(
+      "INSERT INTO activity_events (actor, message, level) VALUES ('system', ?, 'error')"
+    ).run(`Recovered from a crash (${String(e?.message || e).slice(0, 160)}) — server stayed up.`);
+  } catch { /* never let the handler itself throw */ }
+});
+process.on("unhandledRejection", (e) => {
+  console.error("[unhandledRejection — kept alive]", e?.stack || e?.message || e);
+});
 
 const PORT = Number(process.env.PORT || 8787);
 const OS_PASSWORD = process.env.OS_PASSWORD || "";
@@ -41,7 +85,10 @@ if (!WORKER_TOKEN) {
 }
 
 const app = express();
-app.use(express.json({ limit: "2mb" }));
+// 64mb: the cloudsync mirror POSTs the whole leads+emails+runs dataset in one
+// import-data call — at ~1.3k leads / 1.2k full-body emails it blew past 2mb
+// ("Payload Too Large", cloud dashboard froze at Jul 7). Room for years of growth.
+app.use(express.json({ limit: "64mb" }));
 
 // ---- CORS ----------------------------------------------------------------
 // The dashboard front-end can be hosted off-origin (e.g. on Vercel) and still
@@ -90,14 +137,40 @@ function sessionExists(token) {
 }
 
 app.post("/api/login", (req, res) => {
-  const { password } = req.body || {};
+  const { password, machine } = req.body || {};
   if (!password || !timingSafeEqual(password, OS_PASSWORD)) {
     return res.status(401).json({ error: "wrong password" });
   }
   const token = crypto.randomBytes(32).toString("hex");
   db.prepare("INSERT OR IGNORE INTO sessions (token) VALUES (?)").run(token);
   sessionCache.add(token);
+  // remember the PREVIOUS login time so the digest can show "since you were gone".
+  // Machine logins (the 30s cloud-sync in migrate-data.mjs) MUST NOT touch these — else
+  // prev_login_at is always ~30s ago and the live digest reports 0 sent / 0 replies.
+  if (!machine) {
+    const prev = db.prepare("SELECT value FROM settings WHERE key='last_login_at'").get()?.value || "";
+    const up = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    up.run("prev_login_at", prev);
+    up.run("last_login_at", new Date().toISOString().slice(0, 19).replace("T", " "));
+  }
   res.json({ token });
+});
+
+// login digest: what happened since the previous login (single-user app)
+app.get("/api/digest", requireUser, (req, res) => {
+  const prev = db.prepare("SELECT value FROM settings WHERE key='prev_login_at'").get()?.value;
+  const since = prev && prev.length ? prev : db.prepare("SELECT datetime('now','-1 day') d").get().d;
+  const since1 = (sql) => db.prepare(sql).get(since).c;
+  res.json({
+    since,
+    sentSince: since1("SELECT COUNT(*) c FROM emails WHERE direction='out' AND kind IN ('initial','followup') AND subject NOT LIKE '%[TEST%' AND sent_at>=?"),
+    sentToday: db.prepare("SELECT COUNT(*) c FROM emails WHERE direction='out' AND kind='initial' AND subject NOT LIKE '%[TEST%' AND sent_at>=date('now')").get().c,
+    repliesSince: since1("SELECT COUNT(*) c FROM emails WHERE direction='in' AND sent_at>=?"),
+    interested: db.prepare("SELECT COUNT(*) c FROM leads WHERE status='replied'").get().c,
+    bouncesSince: since1("SELECT COUNT(*) c FROM leads WHERE status='bounced' AND last_touch_at>=?"),
+    bankedReady: db.prepare("SELECT COUNT(*) c FROM leads WHERE status='scraped' AND email_status='valid' AND email IS NOT NULL").get().c,
+    lastRun: db.prepare("SELECT summary, status, finished_at FROM runs ORDER BY id DESC LIMIT 1").get() || null,
+  });
 });
 
 function bearerToken(req) {
@@ -181,6 +254,42 @@ app.post("/api/activity/test", requireUser, (req, res) => {
   res.json(event);
 });
 
+// ---- api keys --------------------------------------------------------------
+// Central keystore (server/src/keys.js): masked key info + LIVE remaining-credit
+// lookups per service. Full keys never leave the server through these routes.
+bindKeysLogger(logEvent); // so markFailed()'s "switched to fallback" hits the activity feed
+
+app.get("/api/api-keys", requireUser, async (req, res) => {
+  try {
+    const info = maskedInfo();
+    // All credit lookups in parallel; each has its own 5s timeout and returns
+    // {kind:"unknown"} on failure — one dead provider can't stall or crash the page.
+    const credits = await Promise.all(info.map((s) => fetchCredits(s.service)));
+    res.json(info.map((s, i) => ({ ...s, credits: credits[i] })));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/api-keys", requireUser, (req, res) => {
+  const { service, primary, fallback } = req.body || {};
+  if (!service || !SERVICES[service]) return res.status(400).json({ error: "unknown service" });
+  try {
+    const masked = setKeys(service, { primary, fallback });
+    // Log the action, NEVER the key.
+    logEvent({
+      actor: "system",
+      message: primary
+        ? `API key rotated for ${SERVICES[service].label} from the OS${fallback ? " (+ fallback set)" : ""}.`
+        : `Fallback API key set for ${SERVICES[service].label} from the OS.`,
+      level: "success",
+    });
+    res.json({ ok: true, ...masked });
+  } catch (e) {
+    res.status(400).json({ error: String(e.message || e) });
+  }
+});
+
 // ---- data reads ----------------------------------------------------------
 app.get("/api/stats", requireUser, (req, res) => {
   const monthStart = new Date();
@@ -196,8 +305,185 @@ app.get("/api/stats", requireUser, (req, res) => {
   });
 });
 
+// Rank-and-rent site numbers. Every upstream is wrapped inside siteStats and
+// reports its own ok/error, so this route only 500s if the whole thing throws.
+app.get("/api/site-stats", requireUser, async (req, res) => {
+  try {
+    res.json(await siteStats(String(req.query.site || "epoxy")));
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.get("/api/site-stats/sites", requireUser, (_req, res) => {
+  res.json(Object.entries(SITES).map(([id, s]) => ({ id, label: s.label, domain: s.domain })));
+});
+
 app.get("/api/leads", requireUser, (req, res) => {
-  res.json(db.prepare("SELECT * FROM leads ORDER BY id DESC LIMIT 500").all());
+  // server-side status filter + search so the table shows the RIGHT leads regardless
+  // of age (a 500-row cap on newest-id was hiding older emailed leads → wrong counts).
+  const status = String(req.query.status || "").trim();
+  const q = String(req.query.q || "").trim().toLowerCase();
+  const where = [];
+  const params = [];
+  if (status && status !== "all") { where.push("status=?"); params.push(status); }
+  if (q) {
+    where.push("(lower(business_name) LIKE ? OR lower(ceo_name) LIKE ? OR lower(email) LIKE ? OR lower(city) LIKE ?)");
+    const like = `%${q}%`;
+    params.push(like, like, like, like);
+  }
+  const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  // most recent activity first (emailed leads sort by when they were emailed).
+  // first_sent_at = the INITIAL cold email's timestamp — the CRM "Sent" column shows this,
+  // NOT last_touch_at (which moves on every follow-up and made send dates look wrong).
+  const sql = `SELECT leads.*,
+      (SELECT MIN(sent_at) FROM emails WHERE emails.lead_id = leads.id AND emails.direction='out' AND emails.kind='initial') AS first_sent_at
+    FROM leads ${clause} ORDER BY COALESCE(last_touch_at, scraped_at, '') DESC, id DESC LIMIT 1000`;
+  res.json(db.prepare(sql).all(...params));
+});
+
+// Market rotation: which metro the engine hunts now, which are drained (read-only)
+app.get("/api/markets", requireUser, (_req, res) => {
+  res.json(db.prepare("SELECT * FROM markets ORDER BY id").all());
+});
+
+// ── ManyChat (ig-comment-dm) keyword control panel ──────────────────────────
+// Edits Ted's self-built comment→DM bot straight from the OS. Writes go to the
+// bot's Google Sheet; the Modal bots pick changes up within ~30s (their cache).
+app.get("/api/ig-keywords", requireUser, async (_req, res) => {
+  if (!manychatConfigured()) return res.status(503).json({ error: "ManyChat service-account key not configured on this host — set MANYCHAT_SA_B64 (Railway Variables) or stage data/manychat_sa.json" });
+  try {
+    const [kw, activity, health] = await Promise.all([listKeywords(), recentActivity(15), botHealth()]);
+    res.json({ ...kw, activity, health, warnings: findDuplicateWarnings(kw.rows) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// Ted refreshed the IG long-lived token → restart the ~60-day countdown from today.
+// Without this the expiry date is frozen and the warning lies forever after a refresh.
+app.post("/api/ig-token-refreshed", requireUser, (req, res) => {
+  try {
+    const next = markTokenRefreshed();
+    logEvent({ actor: "system", message: `Instagram token marked refreshed — countdown reset, next expiry ~${next}.`, level: "success" });
+    res.json({ ok: true, token_est_expiry: next });
+  } catch (e) {
+    res.status(400).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/ig-keywords", requireUser, async (req, res) => {
+  if (!manychatConfigured()) return res.status(503).json({ error: "ManyChat service-account key not configured on this host — set MANYCHAT_SA_B64 (Railway Variables) or stage data/manychat_sa.json" });
+  try {
+    const r = await upsertKeyword(req.body || {});
+    logEvent({ actor: "system", message: `ManyChat keyword "${String((req.body || {}).keyword || "").trim()}" ${r.updated ? "updated" : "added"} from the OS — live on IG/FB in ~30s.`, level: "success" });
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+// CRM → Google Sheet backup: manual trigger (the loop also runs every 4h)
+app.post("/api/crm-backup/sync-now", requireUser, async (_req, res) => {
+  try {
+    const r = await runCrmBackup();
+    logEvent({ actor: "system", message: `CRM backed up to Google Sheets on demand: ${r.leads} leads, ${r.emails} emails.`, level: "success" });
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete("/api/ig-keywords/:keyword", requireUser, async (req, res) => {
+  if (!manychatConfigured()) return res.status(503).json({ error: "ManyChat service-account key not configured on this host — set MANYCHAT_SA_B64 (Railway Variables) or stage data/manychat_sa.json" });
+  try {
+    const r = await deleteKeyword(req.params.keyword);
+    logEvent({ actor: "system", message: `ManyChat keyword "${req.params.keyword}" deleted from the OS.`, level: "warn" });
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ── Content Posted: IG/FB post performance (content.js) ─────────────────────
+// Posts + their LATEST metrics snapshot, newest first, plus per-network health
+// from the last refresh. Served straight from SQLite — the 90s background poll
+// (or POST /refresh) is what talks to Meta, so this route is always fast.
+app.get("/api/content", requireUser, (_req, res) => {
+  try {
+    const posts = db
+      .prepare(
+        `SELECT p.*, m.views, m.reach, m.likes, m.comments, m.saves, m.shares, m.captured_at AS metrics_at
+         FROM content_posts p
+         LEFT JOIN content_metrics m ON m.id = (
+           SELECT id FROM content_metrics WHERE post_id = p.id ORDER BY captured_at DESC, id DESC LIMIT 1
+         )
+         ORDER BY p.posted_at DESC`
+      )
+      .all();
+    res.json({ posts, ...contentStatus() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Full metrics time series for one post — the UI's per-card growth sparkline.
+app.get("/api/content/:id/history", requireUser, (req, res) => {
+  try {
+    const post = db.prepare("SELECT id FROM content_posts WHERE id = ?").get(req.params.id);
+    if (!post) return res.status(404).json({ error: "post not found" });
+    const points = db
+      .prepare(
+        "SELECT captured_at, views, reach, likes, comments, saves, shares FROM content_metrics WHERE post_id = ? ORDER BY captured_at ASC, id ASC"
+      )
+      .all(req.params.id);
+    res.json({ post_id: req.params.id, points });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Force a refresh now (shares the in-flight fetch with the 90s loop).
+app.post("/api/content/refresh", requireUser, async (_req, res) => {
+  try {
+    res.json(await refreshContent());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Accurate status counts over ALL leads (the CRM chips read these, not a truncated page)
+app.get("/api/leads/counts", requireUser, (_req, res) => {
+  const rows = db.prepare("SELECT status, COUNT(*) c FROM leads GROUP BY status").all();
+  const counts = {};
+  let all = 0;
+  for (const r of rows) { counts[r.status] = r.c; all += r.c; }
+  counts.all = all;
+  res.json(counts);
+});
+
+// Lead-sourcing funnel for the Pipeline view: Apify scrape -> AnyMailFinder -> valid/dead
+// -> emailed -> replied. Aggregate counts over ALL leads (not the 1000-row page cap) so
+// the numbers are accurate. Shows Ted where every lead is in the pipeline + the
+// AnyMailFinder attrition (why leads drop: no email found, generic/platform inbox, etc.).
+app.get("/api/pipeline", requireUser, (_req, res) => {
+  const es = {};
+  for (const r of db.prepare("SELECT COALESCE(email_status,'unchecked') s, COUNT(*) c FROM leads GROUP BY s").all()) es[r.s] = r.c;
+  const st = {};
+  for (const r of db.prepare("SELECT status s, COUNT(*) c FROM leads GROUP BY s").all()) st[r.s] = r.c;
+  const g = (o, k) => o[k] || 0;
+  res.json({
+    scraped: db.prepare("SELECT COUNT(*) c FROM leads").get().c,            // pulled from Apify
+    unchecked: g(es, "unchecked"),                                          // waiting on AnyMailFinder
+    checked: db.prepare("SELECT COUNT(*) c FROM leads WHERE email_status IS NOT NULL").get().c, // AnyMailFinder ran
+    valid: g(es, "valid"),                                                  // real owner email found
+    emailed: g(st, "emailed") + g(st, "followup_sent") + g(st, "replied"), // actually contacted
+    followup_sent: g(st, "followup_sent"),
+    replied: g(st, "replied"),
+    // AnyMailFinder couldn't get a usable owner email
+    deadBreakdown: { not_found: g(es, "not_found"), platform: g(es, "platform"), unknown: g(es, "unknown"), risky: g(es, "risky") },
+    // filtered out before/around verification (dupes, geo, niche, opt-outs)
+    filteredBreakdown: { dup_recipient: g(es, "dup_recipient"), off_geo: g(es, "off_geo"), duplicate: g(es, "duplicate"), off_niche: g(es, "off_niche"), suppressed: g(es, "suppressed") },
+    byEmailStatus: es,
+  });
 });
 
 // One lead + its full message timeline — the CRM detail view ("everything in one place")
@@ -226,6 +512,101 @@ app.patch("/api/leads/:id", requireUser, (req, res) => {
   res.json({ ok: true, lead: db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id) });
 });
 
+// preview the follow-up email that's queued to go out for this lead
+app.get("/api/leads/:id/followup-preview", requireUser, (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: "lead not found" });
+  const tpl = getSetting("followup_body");
+  if (!tpl) return res.json({ available: false });
+  const sender = senderNameFor(lead.inbox_used || "");
+  const footer = getSetting("compliance_footer");
+  const subject = "Re: " + fillTemplate(getSetting("email_subject") || "", lead, sender);
+  const body = fillTemplate(tpl, lead, sender) + (footer ? `\n\n${footer}` : "");
+  // it only actually sends while status is 'emailed' with a due date in the future
+  const scheduled = lead.status === "emailed" && !!lead.followup_due_at;
+  res.json({ available: true, scheduled, subject, body, due_at: lead.followup_due_at, inbox: lead.inbox_used });
+});
+
+// (re)generate the personalized LinkedIn message for one lead, on demand
+app.post("/api/leads/:id/linkedin-message", requireUser, async (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: "lead not found" });
+  if (!lead.linkedin_url) return res.status(400).json({ error: "this lead has no LinkedIn profile" });
+  try {
+    const message = await generateLinkedInMessage(lead);
+    db.prepare("UPDATE leads SET linkedin_message=? WHERE id=?").run(message, lead.id);
+    res.json({ ok: true, message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── HOT LEADS: leads that replied — thread view, manual reply, AI draft ───────
+// All logic lives in hotleads.js (same feature-module pattern as igkeywords.js);
+// these routes stay thin. Nothing here auto-sends: /reply fires only on an
+// explicit POST after the UI confirm, /draft returns text and can never send.
+app.get("/api/hot-leads", requireUser, (_req, res) => {
+  try {
+    res.json(listHotLeads());
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.get("/api/hot-leads/:id/thread", requireUser, (req, res) => {
+  try {
+    const t = hotLeadThread(Number(req.params.id));
+    if (!t) return res.status(404).json({ error: "lead not found" });
+    res.json(t);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// Reply uploads: files Ted attaches to a Hot Leads reply. multipart/form-data
+// (multer/path/fs imports are hoisted, so they're usable here even though they
+// appear further down the file). 25 MB/file, 5 files — email-sized.
+// NOTE: the dir is resolved INSIDE destination() at request time — __dirname2 is
+// a const defined later in this module (TDZ at load time up here).
+const _replyUpload = multer({
+  storage: multer.diskStorage({
+    destination(_req, _file, cb) {
+      const dir = path.join(process.env.DATA_DIR || path.join(__dirname2, "..", "data"), "uploads", "replies");
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename(_req, file, cb) {
+      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+      cb(null, `${Date.now()}_${safe}`);
+    },
+  }),
+  limits: { fileSize: 25 * 1024 * 1024, files: 5 },
+});
+
+app.post("/api/hot-leads/:id/reply", requireUser, _replyUpload.array("files", 5), async (req, res) => {
+  try {
+    const attachments = (req.files || []).map((f) => ({
+      path: f.path,
+      filename: f.originalname.replace(/[^a-zA-Z0-9._ -]/g, "_"),
+      contentType: f.mimetype || "application/octet-stream",
+    }));
+    const r = await hotLeadSendReply(Number(req.params.id), (req.body || {}).body, attachments);
+    res.json(r);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/hot-leads/:id/draft", requireUser, async (req, res) => {
+  try {
+    const { instructions, draft } = req.body || {};
+    const r = await hotLeadDraftReply(Number(req.params.id), instructions, draft);
+    res.json(r);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: String(e.message || e) });
+  }
+});
+
 // Every email ever sent or received, with the business it belongs to.
 app.get("/api/emails", requireUser, (req, res) => {
   res.json(
@@ -234,15 +615,89 @@ app.get("/api/emails", requireUser, (req, res) => {
         `SELECT e.id, e.lead_id, e.inbox, e.direction, e.subject, e.body, e.kind, e.sent_at,
                 l.business_name, l.email AS lead_email
          FROM emails e LEFT JOIN leads l ON l.id = e.lead_id
-         ORDER BY e.id DESC LIMIT 500`
+         ORDER BY e.id DESC LIMIT 2000`
       )
       .all()
   );
 });
 
+// Send stats: new-leads-emailed and follow-ups, broken down by DAY and by INBOX, so the
+// operator can see "how many leads are we sending" at a glance instead of decoding status
+// chips. All in ET (dates are stored UTC; convert with the same TZ the rest of the UI uses).
+app.get("/api/email-stats", requireUser, (_req, res) => {
+  // per ET-day for the last 30 days
+  const byDay = db
+    .prepare(
+      `SELECT date(sent_at, '-4 hours') AS day,
+              SUM(CASE WHEN kind='initial'  THEN 1 ELSE 0 END) AS new_leads,
+              SUM(CASE WHEN kind='followup' THEN 1 ELSE 0 END) AS followups,
+              SUM(CASE WHEN direction='in'  THEN 1 ELSE 0 END) AS replies
+       FROM emails
+       WHERE direction IN ('out','in') AND (kind IN ('initial','followup') OR direction='in')
+         AND subject NOT LIKE '%[TEST%'
+         AND date(sent_at, '-4 hours') >= date('now','-30 days','-4 hours')
+       GROUP BY day ORDER BY day DESC`
+    )
+    .all();
+  // per inbox, today (ET) — new leads vs follow-ups from each of your sending accounts
+  const byInboxToday = db
+    .prepare(
+      `SELECT inbox,
+              SUM(CASE WHEN kind='initial'  THEN 1 ELSE 0 END) AS new_leads,
+              SUM(CASE WHEN kind='followup' THEN 1 ELSE 0 END) AS followups,
+              COUNT(*) AS total
+       FROM emails
+       WHERE direction='out' AND subject NOT LIKE '%[TEST%'
+         AND date(sent_at, '-4 hours') = date('now','-4 hours')
+       GROUP BY inbox ORDER BY total DESC`
+    )
+    .all();
+  // all-time totals
+  const totals = db
+    .prepare(
+      `SELECT SUM(CASE WHEN kind='initial'  THEN 1 ELSE 0 END) AS new_leads,
+              SUM(CASE WHEN kind='followup' THEN 1 ELSE 0 END) AS followups
+       FROM emails WHERE direction='out' AND subject NOT LIKE '%[TEST%'`
+    )
+    .get();
+  res.json({ byDay, byInboxToday, totals });
+});
+
 // One-time data migration: local instance pushes its leads + email history up.
 app.post("/api/admin/import-data", requireUser, (req, res) => {
-  const { leads = [], emails = [] } = req.body || {};
+  const { leads = [], emails = [], runs = [], replace = false } = req.body || {};
+
+  // Clean-mirror mode: wipe the cloud's stale copy and import the Mac's real data
+  // verbatim (original ids kept, all matching columns), so the cloud dashboard reflects
+  // the live campaign exactly — including the runs table that drives the "last run" card.
+  if (replace) {
+    const colsOf = (t) => new Set(db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name));
+    const imp = (table, rows) => {
+      const ok = colsOf(table);
+      let n = 0;
+      for (const row of rows) {
+        const keys = Object.keys(row).filter((k) => ok.has(k));
+        if (!keys.length) continue;
+        db.prepare(`INSERT INTO ${table} (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`).run(...keys.map((k) => row[k]));
+        n++;
+      }
+      return n;
+    };
+    // remember what we had so the 30s sync only logs when the mirror actually changed
+    // (otherwise the activity feed drowns in identical "Clean mirror" lines all day)
+    const before = {
+      leads: db.prepare("SELECT COUNT(*) c FROM leads").get().c,
+      emails: db.prepare("SELECT COUNT(*) c FROM emails").get().c,
+      runs: db.prepare("SELECT COUNT(*) c FROM runs").get().c,
+    };
+    db.exec("DELETE FROM emails; DELETE FROM leads; DELETE FROM runs;");
+    const lc = imp("leads", leads), ec = imp("emails", emails), rc = imp("runs", runs);
+    if (lc !== before.leads || ec !== before.emails || rc !== before.runs) {
+      logEvent({ actor: "system", message: `Clean mirror from the Mac: ${lc} leads, ${ec} emails, ${rc} runs.`, level: "success" });
+    }
+    return res.json({ ok: true, leads: lc, emails: ec, runs: rc, replace: true });
+  }
+
   let li = 0;
   const insertLead = db.prepare(`
     INSERT INTO leads (business_name, domain, category, rating, review_count, website, email, email_status, source, scraped_at, status, inbox_used, last_touch_at, banked, followup_due_at)
@@ -365,7 +820,10 @@ app.post("/api/gmail/auth", requireUser, async (req, res) => {
 app.post("/api/gmail/test-send", requireUser, async (req, res) => {
   const to = (req.body || {}).to || process.env.TEST_RECIPIENT;
   if (!to) return res.status(400).json({ error: "no recipient — set TEST_RECIPIENT in .env or pass `to`" });
-  const ready = sendingInboxes(); // gmail (authorized) + zapmail smtp
+  // respect send_transport so a manual test never fires from a muted transport
+  // (e.g. the 5 Gmail inboxes stay silent while send_transport=smtp)
+  const transport = getSetting("send_transport");
+  const ready = sendingInboxes().filter((i) => !transport || transport === i.transport);
   if (!ready.length) return res.status(400).json({ error: "no connected inboxes yet" });
   const results = [];
   for (const { email } of ready) {
@@ -391,11 +849,14 @@ app.post("/api/gmail/test-send", requireUser, async (req, res) => {
 });
 
 // ---- morning run + job queue -------------------------------------------------
-app.post("/api/run/morning", requireUser, (req, res) => {
+app.post("/api/run/morning", requireUser, async (req, res) => {
   const target = Math.max(1, Math.min(Number((req.body || {}).target || 10), 500));
   const query = (req.body || {}).query || null;
   try {
-    const runId = startMorningRun({ target, query });
+    // MUST await: startMorningRun is async and throws when a run is already active.
+    // Without await that throw becomes an unhandled rejection (Node exits by default)
+    // and run_id serializes to {}. Awaiting catches it cleanly → proper 409.
+    const runId = await startMorningRun({ target, query });
     res.json({ run_id: runId });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -430,6 +891,7 @@ app.post("/api/worker/jobs/:id/complete", requireWorker, (req, res) => {
   try {
     const LABELS = {
       agentos_post_revise: "Post re-render", motion_graphic: "Motion graphic", video_edit: "Video edit",
+      heygen_video: "Avatar video",
       agentos_post: "AgentOS post", edu_post: "Educational post", livephoto: "Live Photo", carousel: "Carousel",
     };
     const job = db.prepare("SELECT type FROM jobs WHERE id=?").get(req.params.id);
@@ -486,6 +948,123 @@ app.post("/api/skills/avatar-video/voice", requireUser, async (req, res) => {
     logEvent({ actor: "research", message: `Avatar Video failed: ${e.message}`, level: "error" });
     res.status(500).json({ error: e.message });
   }
+});
+
+// ---- Personal Ted Video: his cloned voice + iterative voice-revision session --
+// Every generated take (v1, v2, v3...) is auto-sent to Telegram (audio) and the
+// version history is persisted so the UI can show v1/v2/v3 with their notes.
+
+// Generate one take in Ted's cloned voice and deliver it. Cloud when ElevenLabs
+// is configured (sends to Telegram here), else queue the Mac worker (it delivers
+// to Telegram on completion). Returns the shape the session/version list needs.
+async function makePersonalVoice({ script, speed, version, note, topic }) {
+  const outDir = path.join(process.env.DATA_DIR || path.join(__dirname2, "..", "data"), "output");
+  const capNote = note ? ` (your note: ${note})` : "";
+  const caption = `🎙 Personal Ted Video · v${version}${capNote}\n\n${String(script).slice(0, 700)}`;
+  if (elevenConfigured()) {
+    const audio = await generateVoice({ text: script, voice: VOICE_PERSONAL, speed });
+    const name = `personal_vo_v${version}_${Date.now()}.mp3`;
+    fs.mkdirSync(outDir, { recursive: true });
+    const abs = path.join(outDir, name);
+    fs.writeFileSync(abs, audio);
+    const delivered = await sendTelegramFile(audio, name, caption, "audio");
+    return { mode: "cloud", version, speed, file: name, path: abs, delivered: delivered ? "telegram" : "saved" };
+  }
+  // fallback: no ElevenLabs key here — the Mac worker generates and Telegrams it
+  const outName = `personal_vo_v${version}_${Date.now()}`;
+  const jobId = queueTts({ text: script, voice: VOICE_PERSONAL, outName, speed });
+  return { mode: "mac", version, speed, job_id: jobId, delivered: "mac" };
+}
+
+// Step 1: write the script from a topic, OR use pasted script text EXACTLY as-is.
+app.post("/api/skills/personal-video/script", requireUser, async (req, res) => {
+  const { topic, script, asIs, previous, notes } = req.body || {};
+  try {
+    if (previous && notes) {
+      logEvent({ actor: "research", message: "Personal Ted Video: revising the script with your notes…", level: "info" });
+      const out = await personalVideoScript(topic, { previous, notes });
+      logEvent({ actor: "research", message: "Personal Ted Video: script revised, review it. No audio yet.", level: "success" });
+      return res.json({ script: out });
+    }
+    if (script && (asIs || !topic)) {
+      // Ted pasted his own words — honor them exactly, no LLM rewrite. A bare script
+      // with no topic always means "use my words" even if the client forgot asIs.
+      logEvent({ actor: "research", message: "Personal Ted Video: using your pasted script exactly as given.", level: "success" });
+      return res.json({ script });
+    }
+    if (!topic) return res.status(400).json({ error: "topic or script required" });
+    logEvent({ actor: "research", message: `Personal Ted Video: writing the script for "${topic}"…`, level: "info" });
+    const out = await personalVideoScript(topic);
+    logEvent({ actor: "research", message: "Personal Ted Video: script ready for your review. No audio yet.", level: "success" });
+    res.json({ script: out });
+  } catch (e) {
+    logEvent({ actor: "research", message: `Personal Ted Video script failed: ${e.message}`, level: "error" });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Step 2: approve the script -> generate v1 in his cloned voice at natural speed 1.0.
+app.post("/api/skills/personal-video/voice", requireUser, async (req, res) => {
+  const { script, topic = "" } = req.body || {};
+  if (!script) return res.status(400).json({ error: "script required" });
+  try {
+    logEvent({ actor: "research", message: "Personal Ted Video: script approved, generating v1 in your cloned voice at natural pace…", level: "info" });
+    const speed = 1.0; // his clone reads fast — natural, not the 1.20 avatar default
+    const out = await makePersonalVoice({ script, speed, version: 1, note: "", topic });
+    const state = {
+      topic,
+      script,
+      speed,
+      versions: [
+        { version: 1, note: "", speed, file: out.file || null, path: out.path || null, job_id: out.job_id || null, mode: out.mode, delivered: out.delivered },
+      ],
+    };
+    pvSave(state);
+    logEvent({
+      actor: "research",
+      message: `Personal Ted Video: v1 ready${out.delivered === "telegram" ? ", sent to your Telegram" : out.mode === "mac" ? ", generating on your Mac (queued)" : ""}.`,
+      level: "success",
+    });
+    res.json({ version: 1, ...out });
+  } catch (e) {
+    logEvent({ actor: "research", message: `Personal Ted Video failed: ${e.message}`, level: "error" });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Step 3 (repeatable): a free-text note -> apply it (rewrite script and/or change
+// speed) -> regenerate -> auto-send the new version to Telegram.
+app.post("/api/skills/personal-video/revise", requireUser, async (req, res) => {
+  const { note } = req.body || {};
+  if (!note) return res.status(400).json({ error: "note required" });
+  const state = pvLoad();
+  if (!state || !Array.isArray(state.versions) || !state.versions.length) {
+    return res.status(400).json({ error: "no active session — generate v1 first" });
+  }
+  try {
+    logEvent({ actor: "research", message: `Personal Ted Video: applying your note "${note}"…`, level: "info" });
+    const revised = await reviseTedVoice({ script: state.script, note, speed: state.speed ?? 1.0 });
+    const version = state.versions.length + 1;
+    const out = await makePersonalVoice({ script: revised.script, speed: revised.speed, version, note, topic: state.topic || "" });
+    state.script = revised.script;
+    state.speed = revised.speed;
+    state.versions.push({ version, note, speed: revised.speed, file: out.file || null, path: out.path || null, job_id: out.job_id || null, mode: out.mode, delivered: out.delivered });
+    pvSave(state);
+    logEvent({
+      actor: "research",
+      message: `Personal Ted Video: v${version} ready${out.delivered === "telegram" ? ", sent to your Telegram" : out.mode === "mac" ? ", generating on your Mac (queued)" : ""}.`,
+      level: "success",
+    });
+    res.json({ version, ...out });
+  } catch (e) {
+    logEvent({ actor: "research", message: `Personal Ted Video revision failed: ${e.message}`, level: "error" });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Current session (version history) so the UI can render v1/v2/v3 with their notes.
+app.get("/api/skills/personal-video/session", requireUser, (req, res) => {
+  res.json(pvLoad() || { versions: [] });
 });
 
 app.post("/api/skills/livephoto/topics", requireUser, async (req, res) => {
@@ -638,7 +1217,9 @@ app.post("/api/telegram/send-file", requireUser, async (req, res) => {
   const kind = [".mp4", ".mov", ".m4v", ".webm"].includes(ext) ? "video"
     : [".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext) ? "photo" : "document";
   try {
-    const ok = await sendTelegramFile(fs.readFileSync(abs), path.basename(abs), (req.body || {}).caption || "", kind);
+    const { width, height } = req.body || {};
+    const dims = Number(width) > 0 && Number(height) > 0 ? { width: Number(width), height: Number(height) } : null;
+    const ok = await sendTelegramFile(fs.readFileSync(abs), path.basename(abs), (req.body || {}).caption || "", kind, dims);
     res.json({ ok });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -842,6 +1423,37 @@ app.get("/api/agentos/keywords", requireUser, (_req, res) => {
   });
 });
 
+// Step 3b: the voice is approved — build the actual avatar video in HeyGen.
+// Queued for the Mac worker: this step needs a real browser holding the logged-in
+// HeyGen session, so it cannot run in the cloud (see tedca-os/heygen/README.md).
+app.post("/api/skills/avatar-video/heygen", requireUser, (req, res) => {
+  const { topic, script, audio_file, aspect } = req.body || {};
+  if (!script) return res.status(400).json({ error: "script required" });
+  try {
+    const jobId = queueHeygenVideo({ topic, script, audioFile: audio_file || null, aspect: aspect || "9:16" });
+    logEvent({
+      actor: "research",
+      message: audio_file
+        ? `Avatar Video: queued the HeyGen render for "${topic}" — your Mac will drive HeyGen with the voice you already approved.`
+        : `Avatar Video: queued the HeyGen render for "${topic}" — your Mac will generate the voice and drive HeyGen.`,
+      level: "info",
+    });
+    res.json({ job_id: jobId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Lets the Mac worker fetch a file the CLOUD produced (e.g. the approved VO mp3), so the
+// HeyGen step reuses that exact take instead of re-billing ElevenLabs. Worker-token only,
+// and basename-locked so a job param can never walk out of the output directory.
+app.get("/api/worker/output/:name", requireWorker, (req, res) => {
+  const safe = path.basename(String(req.params.name || ""));
+  const file = path.join(process.env.DATA_DIR || path.join(__dirname2, "..", "data"), "output", safe);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: "not found" });
+  res.sendFile(file);
+});
+
 // ---- Motion Graphic one-click (pure motion graphic, no avatar) --------------
 app.post("/api/skills/motion-graphic", requireUser, (req, res) => {
   const { topic } = req.body || {};
@@ -969,6 +1581,140 @@ app.get("/api/skills/file", (req, res) => {
   }
 });
 
+// ══════════════ Clip Editor projects: persistent version history ══════════════
+// Every upload becomes a PROJECT; every edit/revision is a VERSION row. Version
+// rows with status 'rendering' are lazily synced from their job on read; when a
+// job completes, the output is chmod 444 (versions are IMMUTABLE once done —
+// same discipline as shipped deliverables / Ted-watched references).
+
+function syncEditVersion(v) {
+  if (v.status !== "rendering" || !v.job_id) return v;
+  const job = jobStatus(v.job_id);
+  if (!job) return v;
+  if (job.status === "done") {
+    let out = "", log = "";
+    try {
+      const r = JSON.parse(job.result || "{}");
+      out = r.path || "";
+      log = r.build_log_path || "";
+    } catch { /* keep empty */ }
+    db.prepare(
+      "UPDATE edit_versions SET status = 'done', output_path = ?, build_log_path = ? WHERE id = ?"
+    ).run(out || null, log || null, v.id);
+    if (out && fs.existsSync(out)) {
+      try { fs.chmodSync(out, 0o444); } catch { /* best effort */ }
+    }
+    return { ...v, status: "done", output_path: out, build_log_path: log };
+  }
+  if (job.status === "failed") {
+    db.prepare("UPDATE edit_versions SET status = 'failed' WHERE id = ?").run(v.id);
+    return { ...v, status: "failed", fail_reason: String(job.result || "").slice(0, 400) };
+  }
+  return v;
+}
+
+// create a project + queue its v1 edit (skip_initial: create the project shell only —
+// used when importing an existing finished video as the first version via /seed)
+app.post("/api/edit-projects", requireUser, (req, res) => {
+  const { name, source_path, style, skip_initial, model, effort } = req.body || {};
+  if (!source_path) return res.status(400).json({ error: "source_path required (upload first)" });
+  if (!fs.existsSync(source_path)) return res.status(400).json({ error: "source video not found on disk" });
+  try {
+    const projName = (name || "").trim() || path.basename(source_path).replace(/^\d+_/, "").replace(/\.[^.]+$/, "");
+    const info = db
+      .prepare("INSERT INTO edit_projects (name, source_path, style_id) VALUES (?, ?, ?)")
+      .run(projName, source_path, style || "locked");
+    const projectId = Number(info.lastInsertRowid);
+    if (skip_initial) {
+      logEvent({ actor: "research", message: `Clip Editor: project "${projName}" created (importing an existing video as v1).`, level: "info" });
+      return res.json({ project_id: projectId });
+    }
+    const v = queueEditVersion({ projectId, model: model || "", effort: effort || "" });
+    logEvent({ actor: "research", message: `Clip Editor: project "${projName}" created — v1 edit queued.`, level: "info" });
+    res.json({ project_id: projectId, version_id: v.versionId, job_id: v.jobId, version_n: v.versionN });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// list projects with version counts + latest status
+app.get("/api/edit-projects", requireUser, (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT p.*, COUNT(v.id) AS version_count,
+              (SELECT status FROM edit_versions WHERE project_id = p.id ORDER BY version_n DESC LIMIT 1) AS latest_status
+       FROM edit_projects p LEFT JOIN edit_versions v ON v.project_id = p.id
+       GROUP BY p.id ORDER BY p.id DESC`
+    )
+    .all();
+  res.json(rows);
+});
+
+// project + full version history (lazy-synced)
+app.get("/api/edit-projects/:id", requireUser, (req, res) => {
+  const proj = db.prepare("SELECT * FROM edit_projects WHERE id = ?").get(req.params.id);
+  if (!proj) return res.status(404).json({ error: "project not found" });
+  const versions = db
+    .prepare("SELECT * FROM edit_versions WHERE project_id = ? ORDER BY version_n ASC")
+    .all(proj.id)
+    .map(syncEditVersion);
+  res.json({ ...proj, versions });
+});
+
+// revise from ANY version -> v(n+1) branched from it
+app.post("/api/edit-projects/:id/revise", requireUser, (req, res) => {
+  const { from_version_id, notes, learn, model, effort } = req.body || {};
+  const trimmed = String(notes || "").trim();
+  if (!trimmed) return res.status(400).json({ error: "notes required" });
+  const proj = db.prepare("SELECT * FROM edit_projects WHERE id = ?").get(req.params.id);
+  if (!proj) return res.status(404).json({ error: "project not found" });
+  let fromVersion = null;
+  if (from_version_id) {
+    fromVersion = db
+      .prepare("SELECT * FROM edit_versions WHERE id = ? AND project_id = ?")
+      .get(from_version_id, proj.id);
+    if (!fromVersion) return res.status(400).json({ error: "from_version not found in this project" });
+    if (!["done", "seeded"].includes(fromVersion.status)) {
+      return res.status(400).json({ error: "can only revise a finished version" });
+    }
+  }
+  try {
+    const v = queueEditVersion({ projectId: proj.id, notes: trimmed, learn: learn !== false, fromVersion, model: model || "", effort: effort || "" });
+    logEvent({ actor: "research", message: `Clip Editor: "${proj.name}" v${v.versionN} queued from v${fromVersion ? fromVersion.version_n : "latest"} — "${trimmed.slice(0, 70)}"`, level: "info" });
+    res.json({ version_id: v.versionId, job_id: v.jobId, version_n: v.versionN });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// single version status/output (used by the UI poller)
+app.get("/api/edit-versions/:id", requireUser, (req, res) => {
+  const v = db.prepare("SELECT * FROM edit_versions WHERE id = ?").get(req.params.id);
+  if (!v) return res.status(404).json({ error: "version not found" });
+  res.json(syncEditVersion(v));
+});
+
+// import an existing finished mp4 as a version (honest label: status 'seeded' — no
+// render is faked; used e.g. to bring tonight's hand-built edit in as a project's v1)
+app.post("/api/edit-projects/:id/seed", requireUser, (req, res) => {
+  const { output_path, notes, build_log_path } = req.body || {};
+  if (!output_path || !fs.existsSync(output_path)) {
+    return res.status(400).json({ error: "output_path must exist on disk" });
+  }
+  const proj = db.prepare("SELECT * FROM edit_projects WHERE id = ?").get(req.params.id);
+  if (!proj) return res.status(404).json({ error: "project not found" });
+  const maxN = db
+    .prepare("SELECT COALESCE(MAX(version_n), 0) AS n FROM edit_versions WHERE project_id = ?")
+    .get(proj.id).n;
+  const info = db
+    .prepare(
+      `INSERT INTO edit_versions (project_id, version_n, status, notes, output_path, build_log_path)
+       VALUES (?, ?, 'seeded', ?, ?, ?)`
+    )
+    .run(proj.id, Number(maxN) + 1, notes || "imported existing edit", output_path, build_log_path || null);
+  res.json({ version_id: Number(info.lastInsertRowid), version_n: Number(maxN) + 1 });
+});
+
 // Re-edit with change notes (and the previous version) → a new version. The notes
 // also persist to the style's LEARNINGS.md (the editor reads it every run).
 app.post("/api/skills/video-edit/revise", requireUser, (req, res) => {
@@ -987,10 +1733,19 @@ app.post("/api/skills/video-edit/revise", requireUser, (req, res) => {
 bindLogger(logEvent);
 bindSkillLogger(logEvent);
 bindReplyLogger(logEvent);
+bindHotLeadsLogger(logEvent);
+bindLinkedInLogger(logEvent);
+startOwnerHeartbeat(); // claim the single-owner send lock before any send loop starts
+startBounceGuard(); // auto-pause an inbox if its 7-day bounce rate crosses the danger line
+bindBackupLogger(logEvent);
+startCrmBackupLoop(); // CRM → Google Sheet backup every 4h + daily local .db snapshot
 startFollowupLoop();
 startScheduler();
 startReplyLoop();
+startLinkedInLoop();
 startDailyReportLoop();
+bindContentLogger(logEvent);
+startContentLoop(); // IG/FB post metrics: poll every ~90s (Meta has no push webhook)
 if (!telegramConfigured()) {
   console.warn("Telegram not configured — notifications will be skipped.");
 }
