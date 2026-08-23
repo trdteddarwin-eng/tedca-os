@@ -1,13 +1,33 @@
-import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { api, getToken } from "../api";
 
+// Clip Editor with history: every upload is a PROJECT; every edit is a VERSION row in the DB
+// (refresh-safe). Revising any finished version branches a new version from it — the same
+// v1/v2/v3-with-notes loop as the manual edit rounds, productized.
+
 type Version = {
-  n: number;
-  jobId: number;
-  status: "rendering" | "done" | "failed";
-  path?: string;
-  notes?: string;
+  id: number;
+  project_id: number;
+  version_n: number;
+  parent_version_id: number | null;
+  status: "rendering" | "done" | "failed" | "seeded";
+  notes?: string | null;
+  output_path?: string | null;
+  build_log_path?: string | null;
+  created_at: string;
+  fail_reason?: string;
+};
+
+type Project = {
+  id: number;
+  name: string;
+  source_path: string;
+  style_id: string;
+  created_at: string;
+  version_count?: number;
+  latest_status?: string;
+  versions?: Version[];
 };
 
 function fileUrl(p: string) {
@@ -17,179 +37,229 @@ function fileUrl(p: string) {
 const btnCls =
   "bg-signal text-paper rounded px-4 py-2.5 font-mono text-xs uppercase tracking-widest disabled:opacity-40 hover:opacity-90";
 
+const chipCls = (s: Version["status"] | string | undefined) =>
+  s === "done" || s === "seeded"
+    ? "text-emerald-400 border-emerald-400/40"
+    : s === "failed"
+    ? "text-signal border-signal/40"
+    : "text-amber-400 border-amber-400/40";
+
 export default function ClipEditor() {
   const location = useLocation();
   const navigate = useNavigate();
-  const state = (location.state || {}) as {
+  const [params, setParams] = useSearchParams();
+  const pid = params.get("p") ? Number(params.get("p")) : null;
+
+  const entry = (location.state || {}) as {
     sourcePath?: string;
     styleId?: string;
-    styleName?: string;
-    existing?: boolean; // entered from a finished video (Jobs → Edit)
+    existing?: boolean;
   };
-  const sourcePath = state.sourcePath || "";
-  const styleId = state.styleId || "signature";
-  const styleName = state.styleName || styleId;
 
-  const [versions, setVersions] = useState<Version[]>([]);
-  const [selectedN, setSelectedN] = useState<number | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [learn, setLearn] = useState(true);
-  const [savedNote, setSavedNote] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const enteredRef = useRef(false);
 
-  const mountedRef = useRef(false);
+  const versions = project?.versions || [];
+  const selected = versions.find((v) => v.id === selectedId) || null;
 
-  const selected = versions.find((v) => v.n === selectedN) || null;
+  const openProject = useCallback(
+    (id: number) => {
+      setSelectedId(null);
+      setParams({ p: String(id) });
+    },
+    [setParams]
+  );
 
-  // ── update a single version in place ────────────────────────────
-  function patchVersion(n: number, patch: Partial<Version>) {
-    setVersions((prev) => prev.map((v) => (v.n === n ? { ...v, ...patch } : v)));
-  }
-
-  // ── poll a job → resolve a version to done / failed ─────────────
-  async function pollVersion(n: number, jobId: number) {
-    for (let i = 0; i < 600; i++) {
-      await new Promise((res) => setTimeout(res, 3000));
-      try {
-        const j = await api(`/api/skills/job/${jobId}`);
-        if (j.status === "done") {
-          let path = "";
-          try {
-            const result = JSON.parse(j.result || "{}");
-            path = result.path || "";
-          } catch {
-            /* ignore parse error, keep empty path */
-          }
-          patchVersion(n, { status: "done", path });
-          setSelectedN(n);
-          return;
-        }
-        if (j.status === "failed") {
-          patchVersion(n, { status: "failed", notes: j.result || "render failed" });
-          return;
-        }
-      } catch (e: any) {
-        // transient fetch error — keep polling, surface it softly
-        setError(`poll error (v${n}): ${e.message}`);
-      }
-    }
-    patchVersion(n, { status: "failed", notes: "timed out waiting for the render" });
-  }
-
-  // ── ON MOUNT: kick off v1 from the source clip ──────────────────
+  // ── entry from Skills (new upload) or Jobs (existing video): create a persistent project ──
   useEffect(() => {
-    if (!sourcePath) return;
-    if (mountedRef.current) return;
-    mountedRef.current = true;
-
-    // entered from a finished video (Jobs → Edit): show it as v1, don't re-render
-    if (state.existing) {
-      setVersions([{ n: 1, jobId: 0, status: "done", path: sourcePath }]);
-      setSelectedN(1);
-      return;
-    }
-
+    if (!entry.sourcePath || pid || enteredRef.current) return;
+    enteredRef.current = true;
     (async () => {
       try {
-        const r = await api("/api/skills/video-edit", {
-          method: "POST",
-          body: JSON.stringify({ video_path: sourcePath, style: styleId }),
-        });
-        const v: Version = { n: 1, jobId: r.job_id, status: "rendering" };
-        setVersions([v]);
-        setSelectedN(1);
-        pollVersion(1, r.job_id);
+        let projectId: number;
+        if (entry.existing) {
+          // a finished video enters as a project seeded with itself as v1 (no render queued)
+          const p = await api("/api/edit-projects", {
+            method: "POST",
+            body: JSON.stringify({ source_path: entry.sourcePath, style: entry.styleId || "locked", skip_initial: true }),
+          });
+          await api(`/api/edit-projects/${p.project_id}/seed`, {
+            method: "POST",
+            body: JSON.stringify({ output_path: entry.sourcePath, notes: "imported — the video as it was when this project was opened" }),
+          });
+          projectId = p.project_id;
+        } else {
+          const p = await api("/api/edit-projects", {
+            method: "POST",
+            body: JSON.stringify({ source_path: entry.sourcePath, style: entry.styleId || "locked" }),
+          });
+          projectId = p.project_id;
+        }
+        // one navigation: sets ?p AND clears the entry state so a refresh doesn't re-create
+        navigate(`${location.pathname}?p=${projectId}`, { replace: true, state: null });
       } catch (e: any) {
-        setError(`Error starting first render: ${e.message}`);
+        setError(`Error creating project: ${e.message}`);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [entry.sourcePath]);
 
-  // ── submit a correction → new revised version ───────────────────
-  async function applyChanges() {
+  // ── project list (no project open) ────────────────────────────────────────
+  useEffect(() => {
+    if (pid) return;
+    let dead = false;
+    (async () => {
+      try {
+        const rows = await api("/api/edit-projects");
+        if (!dead) setProjects(rows);
+      } catch (e: any) {
+        if (!dead) setError(e.message);
+      }
+    })();
+    return () => {
+      dead = true;
+    };
+  }, [pid]);
+
+  // ── project detail + polling of rendering versions ───────────────────────
+  const loadProject = useCallback(async () => {
+    if (!pid) return;
+    const p: Project = await api(`/api/edit-projects/${pid}`);
+    setProject(p);
+    setSelectedId((cur) => {
+      if (cur && p.versions?.some((v) => v.id === cur)) return cur;
+      const playable = [...(p.versions || [])].reverse().find((v) => v.output_path);
+      return playable?.id ?? p.versions?.[p.versions.length - 1]?.id ?? null;
+    });
+  }, [pid]);
+
+  useEffect(() => {
+    if (!pid) return;
+    let dead = false;
+    loadProject().catch((e) => !dead && setError(e.message));
+    const iv = setInterval(async () => {
+      try {
+        const p: Project = await api(`/api/edit-projects/${pid}`);
+        if (dead) return;
+        setProject(p);
+      } catch {
+        /* transient poll error — keep the last state */
+      }
+    }, 4000);
+    return () => {
+      dead = true;
+      clearInterval(iv);
+    };
+  }, [pid, loadProject]);
+
+  // ── revise from the selected version ──────────────────────────────────────
+  async function revise() {
     const trimmed = notes.trim();
-    if (!trimmed) return;
+    if (!trimmed || !pid || !selected) return;
+    setBusy(true);
     setError("");
-    const nextN = (versions.reduce((m, v) => Math.max(m, v.n), 0) || 0) + 1;
     try {
-      const r = await api("/api/skills/video-edit/revise", {
+      await api(`/api/edit-projects/${pid}/revise`, {
         method: "POST",
-        body: JSON.stringify({
-          source_path: sourcePath,
-          style: styleId,
-          notes: trimmed,
-          prev_path: selected?.path || "",
-          learn,
-        }),
+        body: JSON.stringify({ from_version_id: selected.id, notes: trimmed, learn }),
       });
-      const v: Version = { n: nextN, jobId: r.job_id, status: "rendering", notes: trimmed };
-      setVersions((prev) => [...prev, v]);
       setNotes("");
-      setSavedNote(
-        learn
-          ? "✓ saved to the editor's memory — it won't repeat this."
-          : "applied to this version only — not added to memory."
-      );
-      pollVersion(nextN, r.job_id);
+      await loadProject();
     } catch (e: any) {
       setError(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
     }
   }
 
-  // ── EMPTY STATE ─────────────────────────────────────────────────
-  if (!sourcePath) {
+  // ════════════════ PROJECT LIST VIEW ════════════════
+  if (!pid) {
     return (
-      <div className="bg-ink min-h-[60vh] flex flex-col items-center justify-center text-center px-6">
-        <p className="text-paper/70 text-sm max-w-md leading-relaxed">
-          No clip loaded — go to One-Click Run → Avatar Video, upload a take and hit{" "}
-          <span className="text-paper">Upload &amp; edit my video.</span>
-        </p>
-        <Link to="/skills" className={`${btnCls} mt-5 inline-block`}>
-          Go to One-Click Run
-        </Link>
+      <div className="bg-ink min-h-screen -m-6 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="font-display text-3xl">
+            tedca os <span className="text-paper/40">· clip editor</span>
+          </h2>
+          <Link to="/skills" className={btnCls}>
+            + new project (upload a video)
+          </Link>
+        </div>
+        {error && <p className="text-signal font-mono text-xs mb-4 break-all">{error}</p>}
+        {projects.length === 0 ? (
+          <div className="bg-panel border border-edge rounded-xl p-10 text-center">
+            <p className="text-paper/60 text-sm leading-relaxed max-w-md mx-auto">
+              No edit projects yet. Upload a video in One-Click Run → Avatar Video and hit{" "}
+              <span className="text-paper">Upload &amp; edit my video</span> — it becomes a project
+              here, with every version you ever make kept in its history.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => openProject(p.id)}
+                className="text-left bg-panel border border-edge rounded-xl p-5 hover:border-signal/60 transition"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-paper font-medium truncate">{p.name}</span>
+                  <span
+                    className={`font-mono text-[9px] uppercase tracking-widest border rounded px-1.5 py-0.5 ${chipCls(
+                      p.latest_status
+                    )}`}
+                  >
+                    {p.latest_status || "empty"}
+                  </span>
+                </div>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-paper/40 mt-2">
+                  {p.version_count || 0} version{(p.version_count || 0) === 1 ? "" : "s"} ·{" "}
+                  {p.created_at?.slice(0, 16)}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
 
-  // ── MAIN UI ─────────────────────────────────────────────────────
-  const chip = (s: Version["status"]) =>
-    s === "done"
-      ? "text-emerald-400 border-emerald-400/40"
-      : s === "failed"
-      ? "text-signal border-signal/40"
-      : "text-amber-400 border-amber-400/40";
-
+  // ════════════════ PROJECT DETAIL VIEW ════════════════
   return (
     <div className="bg-ink min-h-screen -m-6 p-6">
-      {/* header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-baseline gap-3">
           <h2 className="font-display text-3xl">
-            tedca os <span className="text-paper/40">· clip editor</span>
+            tedca os <span className="text-paper/40">· {project?.name || "clip editor"}</span>
           </h2>
           <button
-            onClick={() => navigate("/skills")}
+            onClick={() => setParams({})}
             className="font-mono text-[10px] uppercase tracking-widest text-paper/40 hover:text-paper/70"
           >
-            ← back
+            ← all projects
           </button>
         </div>
         <span className="font-mono text-[10px] uppercase tracking-widest text-signal border border-signal/40 bg-signal/10 rounded px-2.5 py-1.5">
-          ● Live Edit
+          {project?.style_id === "locked" ? "Tedca Locked style" : project?.style_id || ""}
         </span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-5 items-start">
-        {/* ── LEFT COLUMN ───────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 items-start">
+        {/* ── LEFT: revise + history ─────────────────────────────── */}
         <div className="space-y-4">
           <div className="bg-panel border border-edge rounded-xl p-5">
             <p className="font-mono text-[10px] uppercase tracking-widest text-paper/40">
               Tell it what to change
             </p>
             <p className="text-paper/50 text-xs mt-1 mb-3 leading-relaxed">
-              Style: <span className="text-paper/80">{styleName}</span>. Each note also teaches the
-              editor — it learns your taste over time.
+              {selected
+                ? `Revising from v${selected.version_n} — a new version will branch from it.`
+                : "Select a finished version to revise from."}
             </p>
             <textarea
               rows={5}
@@ -198,12 +268,10 @@ export default function ClipEditor() {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  applyChanges();
+                  revise();
                 }
               }}
-              placeholder={
-                'e.g. "cut the intro to 2s", "the riser is too loud", "make the captions bigger" — then press Enter'
-              }
+              placeholder={'e.g. "the opener text is too big", "remove the sound at 0:09" — then press Enter'}
               className="w-full bg-ink border border-edge rounded px-3 py-2.5 font-mono text-xs text-paper placeholder:text-paper/30 leading-relaxed resize-none"
             />
             <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
@@ -217,82 +285,81 @@ export default function ClipEditor() {
                 Remember this — teach the editor
               </span>
             </label>
-            <p className="text-paper/35 text-[11px] mt-1 leading-relaxed">
-              {learn
-                ? "On: this note becomes a permanent rule for all future edits."
-                : "Off: applies to this video only — nothing saved to memory."}
-            </p>
-            <button onClick={applyChanges} disabled={!notes.trim()} className={`${btnCls} mt-3 w-full`}>
-              Apply changes →
+            <button
+              onClick={revise}
+              disabled={busy || !notes.trim() || !selected || !["done", "seeded"].includes(selected.status)}
+              className={`${btnCls} mt-3 w-full`}
+            >
+              {busy ? "queuing…" : `Revise from v${selected?.version_n ?? "?"} →`}
             </button>
-            {savedNote && (
-              <p className="font-mono text-xs text-emerald-400 mt-2 leading-relaxed">{savedNote}</p>
-            )}
             {error && <p className="text-signal font-mono text-xs mt-2 break-all">{error}</p>}
           </div>
 
           <div className="bg-panel border border-edge rounded-xl p-5">
             <p className="font-mono text-[10px] uppercase tracking-widest text-paper/40 mb-3">
-              Versions
+              History
             </p>
-            {versions.length === 0 && (
-              <p className="text-paper/40 text-xs">No versions yet…</p>
-            )}
+            {versions.length === 0 && <p className="text-paper/40 text-xs">No versions yet…</p>}
             <div className="space-y-2">
-              {versions.map((v) => (
-                <button
-                  key={v.n}
-                  onClick={() => v.status === "done" && setSelectedN(v.n)}
-                  disabled={v.status !== "done"}
-                  className={`block w-full text-left rounded p-3 border transition ${
-                    selectedN === v.n
-                      ? "bg-ink border-signal"
-                      : "bg-ink border-edge hover:border-paper/30"
-                  } ${v.status !== "done" ? "cursor-default" : "cursor-pointer"}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs text-paper">v{v.n}</span>
-                    <span
-                      className={`font-mono text-[9px] uppercase tracking-widest border rounded px-1.5 py-0.5 ${chip(
-                        v.status
-                      )}`}
-                    >
-                      {v.status}
-                    </span>
-                  </div>
-                  {v.notes && (
-                    <p className="text-paper/50 text-[11px] mt-1.5 line-clamp-2 break-words">
-                      {v.notes}
-                    </p>
-                  )}
-                </button>
-              ))}
+              {versions.map((v) => {
+                const parent = versions.find((x) => x.id === v.parent_version_id);
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => setSelectedId(v.id)}
+                    className={`block w-full text-left rounded p-3 border transition ${
+                      selectedId === v.id
+                        ? "bg-ink border-signal"
+                        : "bg-ink border-edge hover:border-paper/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-xs text-paper">
+                        v{v.version_n}
+                        {parent && (
+                          <span className="text-paper/40"> · from v{parent.version_n}</span>
+                        )}
+                      </span>
+                      <span
+                        className={`font-mono text-[9px] uppercase tracking-widest border rounded px-1.5 py-0.5 ${chipCls(
+                          v.status
+                        )}`}
+                      >
+                        {v.status}
+                      </span>
+                    </div>
+                    {v.notes && (
+                      <p className="text-paper/50 text-[11px] mt-1.5 line-clamp-2 break-words">
+                        {v.notes}
+                      </p>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* ── CENTER STAGE ──────────────────────────────────────── */}
+        {/* ── CENTER: player ─────────────────────────────────────── */}
         <div className="bg-panel border border-edge rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <p className="font-mono text-[10px] uppercase tracking-widest text-paper/40">
-              Preview {selected ? `· v${selected.n}` : ""}
+              Preview {selected ? `· v${selected.version_n}` : ""}
             </p>
             <p className="font-mono text-[10px] uppercase tracking-widest text-paper/40">
               {selected?.status === "rendering"
                 ? "rendering…"
-                : selected?.status === "done"
-                ? "ready"
-                : selected?.status === "failed"
-                ? "failed"
+                : selected
+                ? selected.status
                 : ""}
             </p>
           </div>
 
-          <div className="mx-auto w-full max-w-[420px] aspect-[4/5] rounded-2xl overflow-hidden bg-black border border-edge flex items-center justify-center shadow-2xl">
-            {selected?.status === "done" && selected.path ? (
+          <div className="mx-auto w-full max-w-[420px] aspect-[9/16] rounded-2xl overflow-hidden bg-black border border-edge flex items-center justify-center shadow-2xl">
+            {selected?.output_path ? (
               <video
-                key={selected.path}
-                src={fileUrl(selected.path)}
+                key={selected.output_path}
+                src={fileUrl(selected.output_path)}
                 controls
                 playsInline
                 className="w-full h-full object-contain bg-black"
@@ -301,28 +368,24 @@ export default function ClipEditor() {
               <div className="text-center px-6">
                 <div className="font-mono text-xs text-amber-400">rendering…</div>
                 <p className="text-paper/40 text-xs mt-2 leading-relaxed">
-                  (a few min — Telegram pings you too)
+                  the editor agent is working — a few minutes (Telegram pings you too)
                 </p>
               </div>
             ) : selected?.status === "failed" ? (
               <div className="text-center px-6">
                 <div className="font-mono text-xs text-signal">render failed</div>
                 <p className="text-paper/40 text-xs mt-2 leading-relaxed break-words">
-                  {selected.notes}
+                  {selected.fail_reason || "see the activity feed"}
                 </p>
               </div>
             ) : (
-              <div className="text-center px-6">
-                <p className="text-paper/40 text-xs leading-relaxed">
-                  your first cut is on the way…
-                </p>
-              </div>
+              <p className="text-paper/40 text-xs px-6 leading-relaxed">select a version…</p>
             )}
           </div>
 
           <p className="text-paper/40 text-xs mt-4 text-center leading-relaxed">
-            Play, scrub and replay with the native controls. Type a note on the left to spin a new
-            version — the editor keeps every take.
+            Every version is kept forever (outputs are write-protected). Select any old version and
+            revise from it to branch a new take — just like a real edit history.
           </p>
         </div>
       </div>

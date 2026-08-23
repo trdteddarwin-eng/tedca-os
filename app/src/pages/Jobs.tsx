@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, apiBlobUrl } from "../api";
+import { fmtET } from "../format";
 
 type Job = {
   id: number;
@@ -45,7 +46,7 @@ function summarize(job: Job): string {
 }
 
 function when(s: string | null): string {
-  return s ? s.replace("T", " ").slice(0, 19) : "—";
+  return s ? fmtET(s, { second: "2-digit" }) : "—";
 }
 
 export default function Jobs() {

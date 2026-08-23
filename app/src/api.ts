@@ -32,6 +32,23 @@ export async function api(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
+// multipart POST (file uploads): the browser must set its own multipart boundary,
+// so unlike api() we do NOT set Content-Type here.
+export async function apiForm(path: string, form: FormData) {
+  const res = await fetch(API_BASE + path, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (res.status === 401) {
+    setToken(null);
+    window.location.href = "/";
+    throw new Error("unauthorized");
+  }
+  if (!res.ok) throw new Error(`${path} → ${res.status}`);
+  return res.json();
+}
+
 // fetch a protected binary (video/image) with auth and return a playable object URL
 export async function apiBlobUrl(path: string): Promise<string> {
   const res = await fetch(API_BASE + path, {

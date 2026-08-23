@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, openFeed } from "../api";
+import { fmtAgo } from "../format";
 
 type Event = {
   id: number;
@@ -58,7 +59,7 @@ export default function Activity() {
             onClick={() => setExpanded(expanded === e.id ? null : e.id)}
           >
             <p className={`font-mono text-xs ${LEVEL_COLOR[e.level] || "text-paper/80"}`}>
-              <span className="text-paper/40">{e.ts}</span>{" "}
+              <span className="text-paper/40">{fmtAgo(e.ts)}</span>{" "}
               <span className="text-signal/80">[{e.actor}]</span> {e.message}
             </p>
             {expanded === e.id && e.raw && (

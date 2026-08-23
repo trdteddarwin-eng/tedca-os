@@ -46,6 +46,7 @@ function AvatarVideo() {
   const [script, setScript] = useState("");
   const [notes, setNotes] = useState("");
   const [status, setStatus] = useState("");
+  const [voiceFile, setVoiceFile] = useState("");
   const { jobState, watch } = useJobWatch();
 
   // Step 4 — upload a recorded take and let an AI editor cut it to a style.
@@ -116,6 +117,8 @@ function AvatarVideo() {
         method: "POST",
         body: JSON.stringify({ script, topic }),
       });
+      // Remember the exact take so the HeyGen step reuses it instead of paying for a second one.
+      if (r.file) setVoiceFile(r.file);
       if (r.delivered === "telegram") setStatus("✓ Voice generated in the cloud — check your Telegram.");
       else if (r.job_id) {
         setStatus("Queued on your Mac…");
@@ -128,11 +131,29 @@ function AvatarVideo() {
     }
   }
 
+  async function makeVideo() {
+    setBusy(true);
+    setStatus("");
+    try {
+      const r = await api("/api/skills/avatar-video/heygen", {
+        method: "POST",
+        body: JSON.stringify({ topic, script, audio_file: voiceFile || null }),
+      });
+      setStatus("Queued on your Mac — driving HeyGen. The finished video lands in your Telegram.");
+      if (r.job_id) await watch(r.job_id);
+    } catch (e: any) {
+      setStatus(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Card title="Avatar Video" tag="tedca · script first, voice on your OK">
       <p className="text-paper/60 text-xs mb-3 leading-relaxed">
         1: topic → script. 2: edit it directly or give notes and revise. 3: approve → the
-        locked avatar voice is generated and sent to your Telegram. No audio until you approve.
+        locked avatar voice is generated and sent to your Telegram. 4: turn that voice into the
+        avatar video in HeyGen. No audio until you approve, no render until you ask.
       </p>
       <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="topic, e.g. why missed calls cost med spas $3k/month" className={inputCls} />
       <button onClick={() => writeScript(false)} disabled={busy || !topic} className={`${btnCls} mt-3`}>
@@ -160,13 +181,21 @@ function AvatarVideo() {
           <button onClick={approve} disabled={busy} className={`${btnCls} mt-3 w-full`}>
             {busy ? "…" : "3 · I like it — generate the voice"}
           </button>
+          <button onClick={makeVideo} disabled={busy} className={`${btnCls} mt-2 w-full`}>
+            {busy ? "…" : "4 · Make the avatar video in HeyGen"}
+          </button>
+          <p className="text-paper/40 text-[10px] mt-1.5 leading-relaxed">
+            Runs on your Mac (needs it awake) and drives HeyGen in a real browser, so it spends
+            plan credits, not API. Avatar V, {voiceFile ? "your approved voice" : "the locked voice"}.
+            About 0.3 credits per second of video.
+          </p>
         </>
       )}
       {status && <p className="font-mono text-xs text-emerald-400 mt-2">{status}</p>}
       {jobState && <p className="font-mono text-xs text-emerald-400 mt-2 break-all">{jobState}</p>}
 
       <div className="mt-5 pt-4 border-t border-edge">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-paper/40">step 4 · edit</p>
+        <p className="font-mono text-[10px] uppercase tracking-widest text-paper/40">step 5 · edit</p>
         <p className="text-paper/60 text-xs mt-1 mb-3 leading-relaxed">
           Recorded your avatar take? Upload it and an AI editor reads the style playbook and cuts it
           for you. It's a real edit — runs a few minutes and the finished MP4 lands on your Telegram.
@@ -191,6 +220,181 @@ function AvatarVideo() {
         </button>
         {editStatus && <p className="font-mono text-xs text-emerald-400 mt-2 break-all">{editStatus}</p>}
       </div>
+    </Card>
+  );
+}
+
+type PVVersion = {
+  version: number;
+  note: string;
+  speed: number;
+  file?: string | null;
+  delivered?: string;
+  mode?: string;
+};
+
+function PersonalVideo() {
+  const [input, setInput] = useState("");
+  const [asIs, setAsIs] = useState(false);
+  const [script, setScript] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [note, setNote] = useState("");
+  const [versions, setVersions] = useState<PVVersion[]>([]);
+  const { jobState, watch } = useJobWatch();
+
+  useEffect(() => {
+    api("/api/skills/personal-video/session")
+      .then((s) => setVersions(s.versions || []))
+      .catch(() => {});
+  }, []);
+
+  async function refreshSession() {
+    try {
+      const s = await api("/api/skills/personal-video/session");
+      setVersions(s.versions || []);
+      if (s.script) setScript(s.script);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function writeScript() {
+    setBusy(true);
+    setStatus("");
+    try {
+      const body = asIs ? { asIs: true, script: input } : { topic: input };
+      const r = await api("/api/skills/personal-video/script", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setScript(r.script);
+    } catch (e: any) {
+      setStatus(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateVoice() {
+    setBusy(true);
+    setStatus("");
+    try {
+      const r = await api("/api/skills/personal-video/voice", {
+        method: "POST",
+        body: JSON.stringify({ script, topic: asIs ? "" : input }),
+      });
+      if (r.delivered === "telegram") setStatus("✓ v1 generated in your cloned voice at natural pace. Check your Telegram.");
+      else if (r.job_id) {
+        setStatus("v1 queued on your Mac…");
+        await watch(r.job_id);
+      } else setStatus(`Saved v1: ${r.file}`);
+      await refreshSession();
+    } catch (e: any) {
+      setStatus(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviseVoice() {
+    setBusy(true);
+    setStatus("");
+    try {
+      const r = await api("/api/skills/personal-video/revise", {
+        method: "POST",
+        body: JSON.stringify({ note }),
+      });
+      if (r.delivered === "telegram") setStatus(`✓ v${r.version} sent to your Telegram.`);
+      else if (r.job_id) {
+        setStatus(`v${r.version} queued on your Mac…`);
+        await watch(r.job_id);
+      } else setStatus(`Saved v${r.version}: ${r.file}`);
+      setNote("");
+      await refreshSession();
+    } catch (e: any) {
+      setStatus(`Error: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Personal Ted Video" tag="personal brand · your cloned voice · revise until it's right">
+      <p className="text-paper/60 text-xs mb-3 leading-relaxed">
+        1: a topic writes the script, or tick the box and paste your own words to use exactly as
+        given. 2: generate v1 in your cloned voice at natural pace. 3: leave a note ("slow down the
+        ending", "more excited on the hook", "change X to Y") and revise. Every version lands on your
+        Telegram.
+      </p>
+      <textarea
+        rows={asIs ? 6 : 2}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder={asIs ? "paste your full script here, used exactly as written" : "topic, e.g. how I automate my whole outbound with Claude Code"}
+        className="w-full bg-ink border border-edge rounded px-3 py-2.5 font-mono text-xs text-paper placeholder:text-paper/30 leading-relaxed"
+      />
+      <label className="flex items-center gap-2 mt-2 text-xs text-paper/60 font-mono cursor-pointer select-none">
+        <input type="checkbox" checked={asIs} onChange={(e) => setAsIs(e.target.checked)} className="accent-signal" />
+        I pasted my own script, use it exactly
+      </label>
+      <button onClick={writeScript} disabled={busy || !input} className={`${btnCls} mt-3`}>
+        {busy && !script ? "Writing…" : asIs ? "1 · Use my script" : script ? "Start over with this topic" : "1 · Write the script"}
+      </button>
+      {script && (
+        <>
+          <textarea
+            rows={9}
+            value={script}
+            onChange={(e) => setScript(e.target.value)}
+            className="w-full mt-3 bg-ink border border-edge rounded px-3 py-2.5 font-mono text-xs text-paper leading-relaxed"
+          />
+          <button onClick={generateVoice} disabled={busy || !script} className={`${btnCls} mt-3 w-full`}>
+            {busy ? "…" : "2 · Generate my voice"}
+          </button>
+        </>
+      )}
+      {versions.length > 0 && (
+        <div className="mt-4">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-paper/40">versions</p>
+          <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
+            {versions.map((v) => (
+              <div key={v.version} className="bg-ink border border-edge rounded p-2.5">
+                <p className="font-mono text-xs text-paper">
+                  v{v.version}
+                  <span className="text-paper/40">
+                    {" "}
+                    · speed {v.speed}× ·{" "}
+                    {v.delivered === "telegram"
+                      ? "sent to Telegram"
+                      : v.mode === "mac"
+                      ? "on your Mac"
+                      : "saved"}
+                  </span>
+                </p>
+                {v.note && <p className="text-paper/50 text-xs mt-1">note: {v.note}</p>}
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-3">
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder='note, e.g. "slow down the ending"'
+              className={inputCls}
+            />
+            <button
+              onClick={reviseVoice}
+              disabled={busy || !note}
+              className="border border-edge text-paper/70 hover:text-paper rounded px-3 font-mono text-xs uppercase tracking-widest disabled:opacity-40 whitespace-nowrap"
+            >
+              Revise the voice
+            </button>
+          </div>
+        </div>
+      )}
+      {status && <p className="font-mono text-xs text-emerald-400 mt-2 break-all">{status}</p>}
+      {jobState && <p className="font-mono text-xs text-emerald-400 mt-2 break-all">{jobState}</p>}
     </Card>
   );
 }
@@ -547,6 +751,7 @@ export default function Skills() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-6 items-start">
         <EduPost />
         <AvatarVideo />
+        <PersonalVideo />
         <MotionGraphic />
         <LivePhoto />
         <Carousel />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { fmtET } from "../format";
 import Office from "../components/Office";
 
 type Stats = {
@@ -185,7 +186,7 @@ export default function Home() {
         )}
         {stats?.running.map((r) => (
           <p key={r.id} className="font-mono text-sm mt-2">
-            <span className="text-signal">●</span> {r.agent} — {r.status} since {r.started_at}
+            <span className="text-signal">●</span> {r.agent} — {r.status} since {fmtET(r.started_at)}
           </p>
         ))}
       </div>
