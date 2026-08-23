@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outreach Art — Outbound campaigns that earn replies</title>
+<meta name="description" content="Outreach Art is a creative studio for outbound campaigns. We build the messaging, design, and copy that gets your emails opened and answered.">
+<style>
+  :root{
+    --ink:#16140f;
+    --ink-soft:#4a463d;
+    --paper:#faf7f0;
+    --paper-2:#f2ecdf;
+    --line:#e4ddcd;
+    --accent:#c8581f;
+    --accent-deep:#a4400f;
+    --gold:#d99a2b;
+    --card:#ffffff;
+    --shadow:0 18px 50px rgba(40,30,10,.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);
+    background:var(--paper);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1140px;margin:0 auto;padding:0 24px}
+  h1,h2,h3{line-height:1.15;letter-spacing:-.02em;font-weight:700}
+
+  /* Header */
+  header{
+    position:sticky;top:0;z-index:50;
+    background:rgba(250,247,240,.86);
+    backdrop-filter:saturate(160%) blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav{display:flex;align-items:center;justify-content:space-between;height:72px}
+  .brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:19px;letter-spacing:-.02em}
+  .mark{
+    width:38px;height:38px;border-radius:11px;flex:0 0 auto;
+    background:
+      radial-gradient(circle at 30% 30%, var(--gold), transparent 55%),
+      linear-gradient(135deg,var(--accent),var(--accent-deep));
+    display:grid;place-items:center;
+  }
+  .mark svg{display:block}
+  .nav-links{display:flex;align-items:center;gap:34px}
+  .nav-links a{font-size:15px;color:var(--ink-soft);font-weight:500;transition:color .15s}
+  .nav-links a:hover{color:var(--ink)}
+  .btn{
+    display:inline-block;font-weight:600;font-size:15px;
+    background:var(--accent);color:#fff;
+    padding:12px 22px;border-radius:10px;
+    transition:transform .12s ease, background .15s ease;
+    box-shadow:0 8px 20px rgba(200,88,31,.22);
+  }
+  .btn:hover{background:var(--accent-deep);transform:translateY(-1px)}
+  .btn.ghost{
+    background:transparent;color:var(--ink);
+    box-shadow:none;border:1px solid var(--line);
+  }
+  .btn.ghost:hover{background:var(--paper-2);border-color:#d6ccb7}
+  .nav .btn{padding:10px 18px}
+  .menu-toggle{display:none}
+
+  /* Hero */
+  .hero{position:relative;overflow:hidden;padding:96px 0 84px}
+  .hero:before{
+    content:"";position:absolute;inset:0;z-index:0;
+    background:
+      radial-gradient(680px 420px at 82% -8%, rgba(217,154,43,.20), transparent 60%),
+      radial-gradient(620px 480px at 6% 18%, rgba(200,88,31,.10), transparent 62%);
+    pointer-events:none;
+  }
+  .hero .wrap{position:relative;z-index:1}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:9px;
+    font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--accent-deep);
+    background:#fff;border:1px solid var(--line);
+    padding:7px 14px;border-radius:999px;margin-bottom:24px;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .hero h1{font-size:clamp(34px,5.4vw,60px);max-width:14ch}
+  .hero p.lead{
+    font-size:clamp(17px,2.1vw,21px);color:var(--ink-soft);
+    max-width:60ch;margin-top:22px;
+  }
+  .hero-cta{display:flex;flex-wrap:wrap;gap:14px;margin-top:34px}
+  .hero-meta{
+    display:flex;flex-wrap:wrap;gap:28px;margin-top:46px;
+    padding-top:30px;border-top:1px solid var(--line);
+  }
+  .stat .num{font-size:30px;font-weight:700;letter-spacing:-.02em}
+  .stat .lbl{font-size:14px;color:var(--ink-soft);margin-top:2px}
+
+  /* Section shells */
+  section{padding:84px 0}
+  .sec-head{max-width:62ch;margin-bottom:46px}
+  .sec-head .kicker{
+    font-size:13px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--accent-deep);margin-bottom:12px;
+  }
+  .sec-head h2{font-size:clamp(28px,3.6vw,40px)}
+  .sec-head p{color:var(--ink-soft);font-size:18px;margin-top:14px}
+
+  /* Services */
+  #services{background:var(--paper-2)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px}
+  .card{
+    background:var(--card);border:1px solid var(--line);
+    border-radius:16px;padding:32px 28px;box-shadow:var(--shadow);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .card:hover{transform:translateY(-4px);box-shadow:0 26px 60px rgba(40,30,10,.14)}
+  .ic{
+    width:52px;height:52px;border-radius:13px;margin-bottom:20px;
+    display:grid;place-items:center;
+    background:linear-gradient(135deg,#fff,var(--paper-2));
+    border:1px solid var(--line);
+  }
+  .card h3{font-size:21px}
+  .card p{color:var(--ink-soft);margin-top:11px;font-size:15.5px}
+  .card ul{list-style:none;margin-top:18px;display:grid;gap:9px}
+  .card li{font-size:14.5px;color:var(--ink-soft);padding-left:24px;position:relative}
+  .card li:before{
+    content:"";position:absolute;left:0;top:8px;
+    width:11px;height:11px;border-radius:50%;
+    background:radial-gradient(circle at 35% 35%,var(--gold),var(--accent));
+  }
+
+  /* About */
+  #about .about-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:54px;align-items:center}
+  #about h2{font-size:clamp(28px,3.6vw,40px);margin-bottom:20px}
+  #about p{color:var(--ink-soft);font-size:17.5px;margin-bottom:16px}
+  #about p strong{color:var(--ink);font-weight:600}
+  .panel{
+    border-radius:18px;padding:34px;color:#fff;position:relative;overflow:hidden;
+    background:linear-gradient(150deg,var(--accent),var(--accent-deep));
+    box-shadow:var(--shadow);
+  }
+  .panel:before{
+    content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;
+    background:radial-gradient(circle,rgba(217,154,43,.55),transparent 65%);
+  }
+  .panel h3{font-size:19px;margin-bottom:18px;position:relative}
+  .panel .row{display:flex;justify-content:space-between;gap:14px;padding:13px 0;border-top:1px solid rgba(255,255,255,.18);position:relative;font-size:15px}
+  .panel .row:first-of-type{border-top:none}
+  .panel .row span:last-child{font-weight:700}
+
+  /* Contact */
+  #contact{background:var(--paper-2)}
+  .contact-card{
+    background:var(--card);border:1px solid var(--line);border-radius:20px;
+    padding:clamp(34px,5vw,58px);box-shadow:var(--shadow);
+    display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center;
+  }
+  .contact-card h2{font-size:clamp(26px,3.4vw,36px);margin-bottom:14px}
+  .contact-card p{color:var(--ink-soft);font-size:17px;margin-bottom:24px}
+  .contact-list{display:grid;gap:16px}
+  .contact-row{display:flex;align-items:center;gap:14px;font-size:16px}
+  .contact-row .ci{
+    width:42px;height:42px;border-radius:11px;flex:0 0 auto;display:grid;place-items:center;
+    background:var(--paper-2);border:1px solid var(--line);
+  }
+  .contact-row a{font-weight:600;color:var(--accent-deep)}
+  .contact-row .sub{font-size:13.5px;color:var(--ink-soft)}
+  .contact-aside{
+    background:linear-gradient(150deg,#1f1b14,#33291a);color:#f4ede0;
+    border-radius:16px;padding:30px;
+  }
+  .contact-aside h3{font-size:18px;margin-bottom:14px;color:#fff}
+  .contact-aside ul{list-style:none;display:grid;gap:11px}
+  .contact-aside li{font-size:14.5px;color:#d8cdb9;padding-left:24px;position:relative}
+  .contact-aside li:before{content:"";position:absolute;left:0;top:8px;width:10px;height:10px;border-radius:50%;background:var(--gold)}
+  .contact-aside .btn{margin-top:22px;width:100%;text-align:center}
+
+  /* Footer */
+  footer{padding:48px 0;border-top:1px solid var(--line)}
+  .foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:18px}
+  .foot .brand{font-size:17px}
+  .foot a{color:var(--ink-soft)}
+  .foot a:hover{color:var(--accent-deep)}
+  .foot-links{display:flex;gap:24px;font-size:15px}
+  .copy{width:100%;border-top:1px solid var(--line);margin-top:26px;padding-top:22px;color:var(--ink-soft);font-size:14px}
+
+  @media (max-width:880px){
+    .grid{grid-template-columns:1fr;gap:20px}
+    #about .about-grid{grid-template-columns:1fr;gap:34px}
+    .contact-card{grid-template-columns:1fr;gap:30px}
+    .nav-links{
+      position:absolute;top:72px;left:0;right:0;flex-direction:column;gap:0;
+      background:var(--paper);border-bottom:1px solid var(--line);
+      max-height:0;overflow:hidden;transition:max-height .25s ease;align-items:stretch;
+    }
+    .nav-links a{padding:16px 24px;border-top:1px solid var(--line)}
+    .nav-links .btn{margin:14px 24px}
+    .menu-toggle{
+      display:grid;place-items:center;width:44px;height:44px;border-radius:10px;
+      border:1px solid var(--line);background:#fff;cursor:pointer;
+    }
+    #nav-check:checked ~ .nav-links{max-height:380px}
+    .menu-toggle .bar{display:block;width:20px;height:2px;background:var(--ink);position:relative}
+    .menu-toggle .bar:before,.menu-toggle .bar:after{content:"";position:absolute;left:0;width:20px;height:2px;background:var(--ink)}
+    .menu-toggle .bar:before{top:-6px}.menu-toggle .bar:after{top:6px}
+  }
+  @media (max-width:560px){
+    section{padding:64px 0}
+    .hero{padding:72px 0 60px}
+    .hero-meta{gap:22px}
+  }
+  #nav-check{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <nav class="nav">
+      <a href="#top" class="brand">
+        <span class="mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M3 20.5L11 4l8 16.5-7.6-4.1L3 20.5z" fill="#fff"/>
+          </svg>
+        </span>
+        Outreach Art
+      </a>
+      <input type="checkbox" id="nav-check">
+      <label for="nav-check" class="menu-toggle" aria-label="Toggle menu"><span class="bar"></span></label>
+      <div class="nav-links">
+        <a href="#services">What we do</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+        <a href="#contact" class="btn">Start a campaign</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- Hero -->
+  <section class="hero" id="hero">
+    <div class="wrap">
+      <span class="eyebrow"><span class="dot"></span> Outbound, done like a craft</span>
+      <h1>Outbound campaigns that actually earn the reply.</h1>
+      <p class="lead">Outreach Art is a creative studio for cold outreach. We pair sharp messaging with clean design and copy that reads like a person wrote it, so your best-fit prospects open, read, and write back.</p>
+      <div class="hero-cta">
+        <a href="#contact" class="btn">Book a campaign call</a>
+        <a href="#services" class="btn ghost">See how we work</a>
+      </div>
+      <div class="hero-meta">
+        <div class="stat"><div class="num">3 lanes</div><div class="lbl">Messaging, design, and copy</div></div>
+        <div class="stat"><div class="num">10–14 days</div><div class="lbl">From kickoff to first send</div></div>
+        <div class="stat"><div class="num">Reply-first</div><div class="lbl">We optimize for answers, not opens</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Services -->
+  <section id="services">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">What we do</div>
+        <h2>Three things, done deliberately.</h2>
+        <p>We do not run spray-and-pray volume. We build a small number of campaigns that say something worth answering, then refine them with your reply data.</p>
+      </div>
+      <div class="grid">
+
+        <div class="card">
+          <div class="ic" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+              <path d="M4 6h16v9H9l-4 4v-4H4V6z" stroke="#c8581f" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M8 10h8M8 12.5h5" stroke="#c8581f" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3>Messaging strategy</h3>
+          <p>We find the one angle your prospect cares about and build the sequence around it, so every touch has a reason to exist.</p>
+          <ul>
+            <li>Audience and segment mapping</li>
+            <li>Core angle and offer framing</li>
+            <li>Multi-step sequence architecture</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="ic" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+              <path d="M4 18L13 5l4 3-9 13-4.5 1L4 18z" stroke="#c8581f" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M11.5 7.5l4 3" stroke="#c8581f" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3>Design and assets</h3>
+          <p>Landing pages, one-pagers, and signatures that look credible the second they land, built to support the ask instead of distracting from it.</p>
+          <ul>
+            <li>Campaign landing pages</li>
+            <li>Branded one-pagers and decks</li>
+            <li>Email signatures and visuals</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="ic" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+              <path d="M6 4h9l4 4v12H6V4z" stroke="#c8581f" stroke-width="1.7" stroke-linejoin="round"/>
+              <path d="M14 4v4h4M9 13h6M9 16h4" stroke="#c8581f" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3>Copy that converts</h3>
+          <p>Plain, human copy for every step, written to sound like you and tested against real replies until the open-to-answer rate moves.</p>
+          <ul>
+            <li>Cold email and follow-up copy</li>
+            <li>LinkedIn and DM scripts</li>
+            <li>Subject line and CTA testing</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- About -->
+  <section id="about">
+    <div class="wrap">
+      <div class="about-grid">
+        <div>
+          <div class="kicker" style="color:var(--accent-deep);font-size:13px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;margin-bottom:12px">About the studio</div>
+          <h2>A small studio that treats outreach like a craft.</h2>
+          <p>Outreach Art started because most cold outbound looks the same: templated, pushy, and easy to ignore. We thought a campaign should feel made, not mass produced.</p>
+          <p>We work with <strong>founders, agencies, and B2B sales teams</strong> who would rather send fewer, sharper messages than blast a list and hope. Every engagement runs through the same loop: research the audience, write the angle, design the assets, send, then read the replies and tighten what is working.</p>
+          <p>You stay close to the work the whole way. No black box, no jargon, just campaigns you would be glad to receive yourself.</p>
+        </div>
+        <div class="panel" aria-hidden="false">
+          <h3>How an engagement runs</h3>
+          <div class="row"><span>01 &nbsp; Discovery and audience</span><span>Week 1</span></div>
+          <div class="row"><span>02 &nbsp; Angle, copy, and design</span><span>Week 2</span></div>
+          <div class="row"><span>03 &nbsp; Launch and warm-up</span><span>Week 2–3</span></div>
+          <div class="row"><span>04 &nbsp; Read replies and refine</span><span>Ongoing</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact -->
+  <section id="contact">
+    <div class="wrap">
+      <div class="contact-card">
+        <div>
+          <div class="kicker" style="color:var(--accent-deep);font-size:13px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;margin-bottom:12px">Contact</div>
+          <h2>Tell us who you want to reach.</h2>
+          <p>Send a short note about your audience and your offer. We will reply within one business day with whether we are a fit and what a first campaign could look like.</p>
+          <div class="contact-list">
+            <div class="contact-row">
+              <span class="ci" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="#c8581f" stroke-width="1.7"/><path d="M4 7l8 6 8-6" stroke="#c8581f" stroke-width="1.7" stroke-linecap="round"/></svg>
+              </span>
+              <span>
+                <a href="mailto:hello@myoutreachart.co">hello@myoutreachart.co</a><br>
+                <span class="sub">Best way to reach us</span>
+              </span>
+            </div>
+            <div class="contact-row">
+              <span class="ci" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#c8581f" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="#c8581f" stroke-width="1.7" stroke-linecap="round"/></svg>
+              </span>
+              <span>
+                Monday to Friday, 9am to 5pm<br>
+                <span class="sub">Replies within one business day</span>
+              </span>
+            </div>
+            <div class="contact-row">
+              <span class="ci" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 21s7-5.4 7-11a7 7 0 10-14 0c0 5.6 7 11 7 11z" stroke="#c8581f" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4" stroke="#c8581f" stroke-width="1.7"/></svg>
+              </span>
+              <span>
+                Remote studio, working across US and EU time zones<br>
+                <span class="sub">myoutreachart.co</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="contact-aside">
+          <h3>What to include</h3>
+          <ul>
+            <li>Who you are trying to reach</li>
+            <li>The offer or outcome you sell</li>
+            <li>Anything you have tried so far</li>
+            <li>Rough timeline and goals</li>
+          </ul>
+          <a href="mailto:hello@myoutreachart.co?subject=New%20campaign%20enquiry" class="btn">Email the studio</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <a href="#top" class="brand">
+        <span class="mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 20.5L11 4l8 16.5-7.6-4.1L3 20.5z" fill="#fff"/></svg>
+        </span>
+        Outreach Art
+      </a>
+      <div class="foot-links">
+        <a href="#services">What we do</a>
+        <a href="#about">About</a>
+        <a href="mailto:hello@myoutreachart.co">hello@myoutreachart.co</a>
+      </div>
+      <div class="copy">
+        &copy; 2026 Outreach Art. All rights reserved. &nbsp;&middot;&nbsp; hello@myoutreachart.co &nbsp;&middot;&nbsp; myoutreachart.co
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

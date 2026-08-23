@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ForgeStack — Internal Tools & Automation for Growing Teams</title>
+<meta name="description" content="ForgeStack is a small product studio that builds internal tools and lightweight automation stacks for growing teams. Custom dashboards, workflow automation, and integrations that fit how your team actually works.">
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f6f7f9;
+    --ink: #14181f;
+    --ink-soft: #4a5462;
+    --line: #e4e7ec;
+    --brand: #2f5bd0;
+    --brand-dark: #1f3f9b;
+    --accent: #11b3a3;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(20,24,31,.04), 0 8px 30px rgba(20,24,31,.06);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  .wrap {
+    width: 100%;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* Header */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(255,255,255,.85);
+    backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 68px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: -.02em;
+  }
+  .logo {
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--brand) 0%, var(--accent) 100%);
+    display: grid;
+    place-items: center;
+  }
+  .logo svg { width: 18px; height: 18px; display: block; }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+  }
+  .nav-links a {
+    font-size: 15px;
+    color: var(--ink-soft);
+    font-weight: 500;
+    transition: color .15s ease;
+  }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-cta {
+    display: inline-block;
+    background: var(--ink);
+    color: #fff;
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-size: 14.5px;
+    font-weight: 600;
+    transition: background .15s ease;
+  }
+  .nav-cta:hover { background: #000; }
+  .nav-toggle { display: none; }
+
+  /* Buttons */
+  .btn {
+    display: inline-block;
+    padding: 14px 26px;
+    border-radius: 11px;
+    font-weight: 600;
+    font-size: 16px;
+    transition: transform .12s ease, box-shadow .15s ease, background .15s ease;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: var(--brand);
+    color: #fff;
+    box-shadow: 0 6px 18px rgba(47,91,208,.28);
+  }
+  .btn-primary:hover { background: var(--brand-dark); transform: translateY(-1px); }
+  .btn-ghost {
+    background: #fff;
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .btn-ghost:hover { border-color: #c7ccd4; }
+
+  /* Hero */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    padding: 88px 0 76px;
+    background:
+      radial-gradient(900px 460px at 82% -8%, rgba(17,179,163,.10), transparent 60%),
+      radial-gradient(760px 520px at 10% 8%, rgba(47,91,208,.10), transparent 58%);
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--brand-dark);
+    background: rgba(47,91,208,.08);
+    border: 1px solid rgba(47,91,208,.15);
+    padding: 6px 13px;
+    border-radius: 999px;
+    margin-bottom: 22px;
+  }
+  .eyebrow .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+  }
+  .hero h1 {
+    font-size: clamp(34px, 5.4vw, 54px);
+    line-height: 1.07;
+    letter-spacing: -.025em;
+    margin: 0 0 22px;
+    max-width: 760px;
+    font-weight: 800;
+  }
+  .hero h1 .hl {
+    background: linear-gradient(120deg, var(--brand), var(--accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero p.sub {
+    font-size: clamp(17px, 2.2vw, 20px);
+    color: var(--ink-soft);
+    max-width: 600px;
+    margin: 0 0 34px;
+  }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .hero-note {
+    margin-top: 30px;
+    font-size: 14px;
+    color: var(--ink-soft);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+  }
+  .hero-note span { display: inline-flex; align-items: center; gap: 8px; }
+  .hero-note svg { width: 16px; height: 16px; color: var(--accent); flex: none; }
+
+  /* Section shells */
+  section { padding: 78px 0; }
+  .section-head { max-width: 640px; margin-bottom: 48px; }
+  .section-head .kicker {
+    font-size: 13px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 12px;
+  }
+  .section-head h2 {
+    font-size: clamp(27px, 3.6vw, 36px);
+    letter-spacing: -.02em;
+    margin: 0 0 14px;
+    font-weight: 800;
+  }
+  .section-head p { font-size: 17px; color: var(--ink-soft); margin: 0; }
+
+  /* Services */
+  .services { background: var(--bg-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 30px 26px;
+    box-shadow: var(--shadow);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 10px 34px rgba(20,24,31,.10); }
+  .card .ic {
+    width: 46px; height: 46px; border-radius: 11px;
+    display: grid; place-items: center; margin-bottom: 20px;
+  }
+  .card .ic svg { width: 23px; height: 23px; }
+  .ic.a { background: rgba(47,91,208,.10); color: var(--brand); }
+  .ic.b { background: rgba(17,179,163,.12); color: #0c8a7e; }
+  .ic.c { background: rgba(99,102,241,.12); color: #4f4dd6; }
+  .card h3 { font-size: 19px; margin: 0 0 10px; letter-spacing: -.01em; }
+  .card p { margin: 0; color: var(--ink-soft); font-size: 15.5px; }
+  .card ul { margin: 16px 0 0; padding: 0; list-style: none; }
+  .card li {
+    font-size: 14px; color: var(--ink-soft);
+    padding-left: 22px; position: relative; margin-bottom: 6px;
+  }
+  .card li::before {
+    content: ""; position: absolute; left: 0; top: 8px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* About */
+  .about-grid {
+    display: grid;
+    grid-template-columns: 1.15fr .85fr;
+    gap: 56px;
+    align-items: center;
+  }
+  .about-grid h2 {
+    font-size: clamp(27px, 3.6vw, 36px);
+    letter-spacing: -.02em; margin: 0 0 18px; font-weight: 800;
+  }
+  .about-grid p { color: var(--ink-soft); font-size: 17px; margin: 0 0 16px; }
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  .stat {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 24px 22px;
+    background: linear-gradient(180deg, #fff, var(--bg-soft));
+  }
+  .stat .n {
+    font-size: 30px; font-weight: 800; letter-spacing: -.02em;
+    color: var(--brand-dark);
+  }
+  .stat .l { font-size: 14px; color: var(--ink-soft); margin-top: 4px; }
+
+  /* Contact */
+  .contact {
+    background: var(--ink);
+    color: #fff;
+    border-radius: 0;
+  }
+  .contact-inner {
+    display: grid;
+    grid-template-columns: 1.1fr .9fr;
+    gap: 50px;
+    align-items: center;
+  }
+  .contact h2 {
+    font-size: clamp(28px, 3.8vw, 38px);
+    letter-spacing: -.02em; margin: 0 0 16px; font-weight: 800;
+  }
+  .contact p { color: #b9c0cc; font-size: 17px; margin: 0 0 26px; }
+  .contact .btn-primary { background: var(--accent); box-shadow: 0 6px 18px rgba(17,179,163,.3); }
+  .contact .btn-primary:hover { background: #0e9e90; }
+  .contact-card {
+    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: var(--radius);
+    padding: 30px 28px;
+  }
+  .contact-card .row { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+  .contact-card .row:last-child { margin-bottom: 0; }
+  .contact-card .ci {
+    width: 40px; height: 40px; flex: none; border-radius: 10px;
+    background: rgba(255,255,255,.08); display: grid; place-items: center;
+  }
+  .contact-card .ci svg { width: 19px; height: 19px; color: var(--accent); }
+  .contact-card .lab { font-size: 13px; color: #8b94a3; text-transform: uppercase; letter-spacing: .05em; }
+  .contact-card .val { font-size: 16px; color: #fff; font-weight: 600; }
+  .contact-card .val a:hover { color: var(--accent); }
+
+  /* Footer */
+  footer {
+    background: #0c0f14;
+    color: #9aa3b2;
+    padding: 44px 0 38px;
+  }
+  .foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+  }
+  .foot .brand { color: #fff; font-size: 17px; }
+  .foot a { color: #c3cad6; }
+  .foot a:hover { color: #fff; }
+  .foot-links { display: flex; gap: 26px; font-size: 14.5px; }
+  .copy { font-size: 13.5px; color: #6b7383; margin-top: 26px; padding-top: 22px; border-top: 1px solid rgba(255,255,255,.08); }
+
+  @media (max-width: 860px) {
+    .cards { grid-template-columns: 1fr; }
+    .about-grid, .contact-inner { grid-template-columns: 1fr; gap: 32px; }
+    .nav-links { display: none; }
+    .nav-cta { display: none; }
+    section { padding: 60px 0; }
+    .hero { padding: 64px 0 56px; }
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="wrap nav">
+      <a class="brand" href="#top" aria-label="ForgeStack home">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 3 7l9 5 9-5-9-5Z" fill="#fff" opacity=".95"/><path d="m3 12 9 5 9-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity=".75"/><path d="m3 17 9 5 9-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/></svg>
+        </span>
+        ForgeStack
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#services">What we do</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+      </nav>
+      <a class="nav-cta" href="#contact">Start a project</a>
+    </div>
+  </header>
+
+  <main id="top">
+
+    <!-- Hero -->
+    <section class="hero" id="hero">
+      <div class="wrap">
+        <span class="eyebrow"><span class="dot"></span> Internal tools &amp; automation studio</span>
+        <h1>Software that runs the <span class="hl">boring parts</span> of your business.</h1>
+        <p class="sub">ForgeStack is a small product studio that builds internal tools and lightweight automation stacks for growing teams. We replace the spreadsheets, copy-paste work, and tab-switching that slow you down with tools your team actually wants to use.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#contact">Book a scoping call</a>
+          <a class="btn btn-ghost" href="#services">See how we work</a>
+        </div>
+        <div class="hero-note">
+          <span><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Fixed-scope, fixed-price builds</span>
+          <span><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> First working version in 2 to 3 weeks</span>
+          <span><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> You own the code</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Services -->
+    <section class="services" id="services">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="kicker">What we do</div>
+          <h2>Three ways we take work off your team's plate</h2>
+          <p>We pick one painful workflow, ship a tool that fixes it, then build out from there. No giant platforms you never finish rolling out.</p>
+        </div>
+        <div class="cards">
+
+          <div class="card">
+            <div class="ic a" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M3 9h18M9 21V9" stroke="currentColor" stroke-width="2"/></svg>
+            </div>
+            <h3>Internal tools &amp; dashboards</h3>
+            <p>Custom admin panels, ops dashboards, and back-office apps built around how your team really works, not a template you have to bend yourself to fit.</p>
+            <ul>
+              <li>Order, inventory, and client portals</li>
+              <li>Approval and review queues</li>
+              <li>Reporting that pulls from your real data</li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <div class="ic b" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v4m0 10v4m9-9h-4M7 12H3m13.5-6.5-2.8 2.8M9.3 14.7l-2.8 2.8m11 0-2.8-2.8M9.3 9.3 6.5 6.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>
+            </div>
+            <h3>Workflow automation</h3>
+            <p>We map the manual steps your team repeats every day and turn them into reliable background jobs, so the busywork happens on its own.</p>
+            <ul>
+              <li>Lead and onboarding handoffs</li>
+              <li>Scheduled syncs and notifications</li>
+              <li>Document and invoice generation</li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <div class="ic c" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M8 7 3 12l5 5M16 7l5 5-5 5M13 4l-2 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Integrations &amp; data plumbing</h3>
+            <p>We connect the tools you already pay for so data moves cleanly between them, with one source of truth instead of six exports a week.</p>
+            <ul>
+              <li>CRM, billing, and support sync</li>
+              <li>Clean APIs and webhooks</li>
+              <li>Migrations off brittle spreadsheets</li>
+            </ul>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section id="about">
+      <div class="wrap about-grid">
+        <div>
+          <div class="kicker" style="font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:12px;">About ForgeStack</div>
+          <h2>A small studio that ships, not a big agency that bills.</h2>
+          <p>ForgeStack started in 2021 as two engineers who kept getting the same request from growing companies: "we have the data, we just need something simple that ties it all together." We have stayed deliberately small so the people scoping your project are the same people writing the code.</p>
+          <p>We work in tight, fixed-scope sprints, share progress every few days, and hand over clean, documented code that your own team can maintain. No lock-in, no mystery, no platform you are renting forever. When a quick automation is the right answer, we will tell you, even if it is smaller than what you came in asking for.</p>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="n">2 to 3 wk</div><div class="l">To first working version</div></div>
+          <div class="stat"><div class="n">40+</div><div class="l">Tools shipped since 2021</div></div>
+          <div class="stat"><div class="n">100%</div><div class="l">Code ownership stays with you</div></div>
+          <div class="stat"><div class="n">Senior</div><div class="l">Engineers on every build</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contact -->
+    <section class="contact" id="contact">
+      <div class="wrap contact-inner">
+        <div>
+          <h2>Tell us what is slowing your team down.</h2>
+          <p>Send a short note about the workflow that eats your week. We will reply within one business day with a few honest questions and whether it is something we can help with.</p>
+          <a class="btn btn-primary" href="mailto:hello@tryforgestack.co?subject=Project%20inquiry%20for%20ForgeStack">Email us about your project</a>
+        </div>
+        <div class="contact-card">
+          <div class="row">
+            <span class="ci" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="m4 7 8 6 8-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <div>
+              <div class="lab">Email</div>
+              <div class="val"><a href="mailto:hello@tryforgestack.co">hello@tryforgestack.co</a></div>
+            </div>
+          </div>
+          <div class="row">
+            <span class="ci" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <div>
+              <div class="lab">Response time</div>
+              <div class="val">Within one business day</div>
+            </div>
+          </div>
+          <div class="row">
+            <span class="ci" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="9" r="2.5" stroke="currentColor" stroke-width="2"/></svg></span>
+            <div>
+              <div class="lab">Where we work</div>
+              <div class="val">Remote, partnered with teams across North America and Europe</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="foot">
+        <a class="brand" href="#top" style="display:flex;align-items:center;gap:11px;font-weight:700;">
+          <span class="logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 3 7l9 5 9-5-9-5Z" fill="#fff" opacity=".95"/><path d="m3 12 9 5 9-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity=".75"/></svg>
+          </span>
+          ForgeStack
+        </a>
+        <div class="foot-links">
+          <a href="#services">What we do</a>
+          <a href="#about">About</a>
+          <a href="mailto:hello@tryforgestack.co">hello@tryforgestack.co</a>
+        </div>
+      </div>
+      <div class="copy">
+        &copy; 2026 ForgeStack. All rights reserved. &nbsp;|&nbsp; tryforgestack.co &nbsp;|&nbsp; Internal tools and automation for growing teams.
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

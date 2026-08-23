@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Edge-Case Handling — Instantly vs Tedca OS</title>
+<style>
+  :root{
+    --ink:#0f1115; --panel:#171a21; --panel2:#1c2029; --edge:#2a2f3a;
+    --paper:#e9ebef; --muted:#8a909c; --signal:#ff6a3d; --signal-dim:#ff6a3d22;
+    --ok:#34d399; --warn:#f6c453; --sky:#6ea8fe;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--ink); color:var(--paper);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    overflow:hidden; -webkit-font-smoothing:antialiased;
+  }
+  .serif{font-family:Georgia,"Times New Roman",serif}
+  /* progress */
+  #bar{position:fixed;top:0;left:0;height:3px;background:var(--signal);width:0;z-index:50;transition:width .3s ease}
+  /* deck */
+  .slide{
+    position:fixed;inset:0;display:none;flex-direction:column;justify-content:center;
+    padding:clamp(28px,6vw,90px);opacity:0;transform:translateY(14px);
+    transition:opacity .35s ease,transform .35s ease;
+  }
+  .slide.active{display:flex;opacity:1;transform:none}
+  .kicker{font:600 12px/1 ui-monospace,monospace;letter-spacing:.28em;text-transform:uppercase;color:var(--signal);margin-bottom:18px}
+  h1{font-size:clamp(34px,6.5vw,82px);line-height:1.02;font-weight:600;letter-spacing:-.02em}
+  h1 em{font-style:italic;color:var(--signal)}
+  h2{font-size:clamp(26px,4.4vw,52px);line-height:1.05;font-weight:600;letter-spacing:-.015em;margin-bottom:6px}
+  .sub{color:var(--muted);font-size:clamp(15px,1.8vw,21px);margin-top:18px;max-width:50ch;line-height:1.5}
+  .lead{color:var(--paper);font-size:clamp(16px,1.9vw,22px);line-height:1.55;max-width:60ch;margin-top:8px}
+  /* grid of edge cases */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:34px;max-width:1100px}
+  .card{background:var(--panel);border:1px solid var(--edge);border-radius:14px;padding:18px 20px}
+  .card .n{font:600 11px/1 ui-monospace,monospace;color:var(--signal);letter-spacing:.1em}
+  .card .t{font-size:17px;font-weight:600;margin-top:10px}
+  .card .d{color:var(--muted);font-size:13.5px;margin-top:6px;line-height:1.45}
+  /* two-column compare */
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:30px;max-width:1080px}
+  @media(max-width:760px){.cmp{grid-template-columns:1fr}}
+  .col{background:var(--panel);border:1px solid var(--edge);border-radius:16px;padding:24px}
+  .col h3{font:600 12px/1 ui-monospace,monospace;letter-spacing:.18em;text-transform:uppercase;margin-bottom:16px}
+  .col.inst h3{color:var(--sky)} .col.ted h3{color:var(--signal)}
+  .col li{list-style:none;display:flex;gap:11px;padding:9px 0;border-top:1px solid var(--edge);font-size:15.5px;line-height:1.45;color:var(--paper)}
+  .col li:first-of-type{border-top:none}
+  .col li .ic{flex:none;width:18px;text-align:center}
+  /* scorecard table */
+  table{width:100%;max-width:1100px;border-collapse:collapse;margin-top:26px;font-size:15px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--edge);vertical-align:top}
+  th{font:600 11px/1 ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  td.s{white-space:nowrap;font-weight:600}
+  .ok{color:var(--ok)} .warn{color:var(--warn)}
+  /* numbered recreate list */
+  .steps{margin-top:28px;max-width:920px}
+  .step{display:flex;gap:18px;padding:16px 0;border-top:1px solid var(--edge)}
+  .step:first-child{border-top:none}
+  .step .num{flex:none;width:42px;height:42px;border-radius:11px;background:var(--signal-dim);color:var(--signal);
+    display:flex;align-items:center;justify-content:center;font:600 18px ui-monospace,monospace}
+  .step .body .h{font-size:18px;font-weight:600}
+  .step .body .p{color:var(--muted);font-size:14.5px;margin-top:4px;line-height:1.5}
+  .tag{display:inline-block;font:600 10px/1 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;
+    padding:5px 9px;border-radius:999px;margin-left:8px}
+  .tag.hi{background:#34d39922;color:var(--ok)} .tag.med{background:#f6c45322;color:var(--warn)}
+  /* footer nav */
+  #nav{position:fixed;bottom:20px;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:18px;z-index:40}
+  .dots{display:flex;gap:7px}
+  .dot{width:7px;height:7px;border-radius:50%;background:#3a4150;cursor:pointer;transition:.2s}
+  .dot.on{background:var(--signal);transform:scale(1.35)}
+  .btn{background:var(--panel);border:1px solid var(--edge);color:var(--paper);width:38px;height:38px;border-radius:10px;
+    font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .btn:hover{border-color:var(--signal);color:var(--signal)}
+  #count{position:fixed;top:20px;right:24px;font:600 12px ui-monospace,monospace;color:var(--muted);z-index:40}
+  .brand{position:fixed;top:18px;left:24px;font-size:15px;z-index:40}
+  .brand b{font-weight:600}.brand em{font-style:italic;color:var(--signal)}
+  .hint{position:fixed;bottom:20px;right:24px;font:11px ui-monospace,monospace;color:#4a5160;z-index:40}
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div class="brand serif"><b>Tedca</b> <em>OS</em></div>
+<div id="count"></div>
+
+<!-- 1 TITLE -->
+<section class="slide">
+  <div class="kicker">Edge-case playbook</div>
+  <h1 class="serif">How Instantly handles<br>the <em>hard cases</em></h1>
+  <p class="sub">A teardown of how the category leader handles cold-email edge cases — and exactly where Tedca OS already matches it, and where we can level up.</p>
+</section>
+
+<!-- 2 LANDSCAPE -->
+<section class="slide">
+  <div class="kicker">The 10 edge cases that break cold email</div>
+  <h2 class="serif">Every one of these can sink a campaign</h2>
+  <div class="grid">
+    <div class="card"><div class="n">01</div><div class="t">Per-inbox volume</div><div class="d">Send too much from one box → spam</div></div>
+    <div class="card"><div class="n">02</div><div class="t">Inbox rotation</div><div class="d">Spread load across many senders</div></div>
+    <div class="card"><div class="n">03</div><div class="t">Pacing</div><div class="d">Bursts look like a bot</div></div>
+    <div class="card"><div class="n">04</div><div class="t">Warmup</div><div class="d">Cold domains land in spam</div></div>
+    <div class="card"><div class="n">05</div><div class="t">Bounces</div><div class="d">Bad addresses wreck reputation</div></div>
+    <div class="card"><div class="n">06</div><div class="t">Verification</div><div class="d">Catch-all / risky / role emails</div></div>
+    <div class="card"><div class="n">07</div><div class="t">Replies</div><div class="d">Stop the sequence, classify intent</div></div>
+    <div class="card"><div class="n">08</div><div class="t">Out-of-office</div><div class="d">Don't kill the lead — pause it</div></div>
+    <div class="card"><div class="n">09</div><div class="t">Duplicates</div><div class="d">Never email the same person twice</div></div>
+    <div class="card"><div class="n">10</div><div class="t">Suppression</div><div class="d">Honor opt-outs & blocklists forever</div></div>
+  </div>
+</section>
+
+<!-- 3 LIMITS + ROTATION -->
+<section class="slide">
+  <div class="kicker">Volume · Rotation</div>
+  <h2 class="serif">Scale by inboxes, never by volume</h2>
+  <div class="cmp">
+    <div class="col inst"><h3>Instantly</h3>
+      <ul>
+        <li><span class="ic">•</span>Hard cap ~30 emails/day per inbox</li>
+        <li><span class="ic">•</span>Pools segmented by domain, provider, age, health</li>
+        <li><span class="ic">•</span>Throttles on live reputation feedback (Postmaster / SNDS)</li>
+        <li><span class="ic">•</span>Underperforming inboxes pulled from rotation</li>
+      </ul>
+    </div>
+    <div class="col ted"><h3>Tedca OS</h3>
+      <ul>
+        <li><span class="ic ok">✓</span>Caps at <b>20/inbox</b> — even safer</li>
+        <li><span class="ic ok">✓</span>Rotates 12 inboxes, picks the least-used each send</li>
+        <li><span class="ic warn">▲</span>No reputation-feedback pool management yet</li>
+        <li><span class="ic ok">✓</span>send_transport gate keeps it to the 12 Zapmail boxes</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 4 PACING + WARMUP -->
+<section class="slide">
+  <div class="kicker">Pacing · Warmup</div>
+  <h2 class="serif">Look human, ramp slowly</h2>
+  <div class="cmp">
+    <div class="col inst"><h3>Instantly</h3>
+      <ul>
+        <li><span class="ic">•</span>Randomized throttling, weekday-only option</li>
+        <li><span class="ic">•</span>Gradual ramp (2 → 4 → 6 / day) on new boxes</li>
+        <li><span class="ic">•</span>14–30 day warmup via a 4.2M-account network</li>
+        <li><span class="ic">•</span>Read-emulation makes warmup look real</li>
+      </ul>
+    </div>
+    <div class="col ted"><h3>Tedca OS</h3>
+      <ul>
+        <li><span class="ic ok">✓</span>80–180s random jitter between every send</li>
+        <li><span class="ic ok">✓</span>Mon–Fri, 8am–5pm ET only</li>
+        <li><span class="ic ok">✓</span>Warmup on; pre-warmed boxes; 12→50 ramp for new ones</li>
+        <li><span class="ic ok">✓</span>Per-inbox cadence ~one email / 20–40 min</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 5 BOUNCES + VERIFY -->
+<section class="slide">
+  <div class="kicker">Bounces · Verification</div>
+  <h2 class="serif">Protect the domain from bad addresses</h2>
+  <div class="cmp">
+    <div class="col inst"><h3>Instantly</h3>
+      <ul>
+        <li><span class="ic">•</span>Keep bounces under 1%</li>
+        <li><span class="ic">•</span>Auto-pause the whole inbox at ~3% bounce</li>
+        <li><span class="ic">•</span>Verify before send; flag catch-all / role / risky</li>
+        <li><span class="ic">•</span>Re-verify the list, then resume lower</li>
+      </ul>
+    </div>
+    <div class="col ted"><h3>Tedca OS</h3>
+      <ul>
+        <li><span class="ic ok">✓</span>Bounce → suppress the address + stop its sequence</li>
+        <li><span class="ic warn">▲</span>No per-inbox bounce-rate auto-pause</li>
+        <li><span class="ic ok">✓</span>AnyMailFinder verifies; only "valid" gets sent</li>
+        <li><span class="ic warn">▲</span>No explicit catch-all / role-based tier</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 6 REPLIES + OOO -->
+<section class="slide">
+  <div class="kicker">Replies · Out-of-office</div>
+  <h2 class="serif">Read the room, don't burn the lead</h2>
+  <div class="cmp">
+    <div class="col inst"><h3>Instantly</h3>
+      <ul>
+        <li><span class="ic">•</span>Stops the sequence the moment they reply</li>
+        <li><span class="ic">•</span>AI labels: interested / not interested / objection / referral</li>
+        <li><span class="ic">•</span>OOO → <b>pause until their return date, then resume</b></li>
+        <li><span class="ic">•</span>Unibox: one place for every reply</li>
+      </ul>
+    </div>
+    <div class="col ted"><h3>Tedca OS</h3>
+      <ul>
+        <li><span class="ic ok">✓</span>Concierge stops follow-ups on reply</li>
+        <li><span class="ic ok">✓</span>Classifies interested / neutral / negative / unsub</li>
+        <li><span class="ic warn">▲</span>Detects OOO but only <i>ignores</i> it — no resume-on-date</li>
+        <li><span class="ic ok">✓</span>Auto-reply is price-screened; risky drafts escalate to you</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 7 DUPES + SUPPRESSION -->
+<section class="slide">
+  <div class="kicker">Duplicates · Suppression</div>
+  <h2 class="serif">Never the same person twice</h2>
+  <div class="cmp">
+    <div class="col inst"><h3>Instantly</h3>
+      <ul>
+        <li><span class="ic">•</span>Auto-dedup on import (unique only, can't disable)</li>
+        <li><span class="ic">•</span>Won't email a lead already in the workspace</li>
+        <li><span class="ic">•</span>Global blocklist — emails <b>and domains</b></li>
+        <li><span class="ic">•</span>AI auto-blocklist triggers on reply content</li>
+      </ul>
+    </div>
+    <div class="col ted"><h3>Tedca OS</h3>
+      <ul>
+        <li><span class="ic ok">✓</span>Ingest dedup by real domain / normalized name</li>
+        <li><span class="ic ok">✓</span><b>"Ever-contacted" email guard</b> — built today</li>
+        <li><span class="ic ok">✓</span>Suppression list + unsubscribe → do-not-contact</li>
+        <li><span class="ic warn">▲</span>No domain-level blocklist / AI auto-triggers</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 8 SCORECARD -->
+<section class="slide">
+  <div class="kicker">The scorecard</div>
+  <h2 class="serif">You already match Instantly on most of it</h2>
+  <table>
+    <thead><tr><th>Edge case</th><th>Tedca OS</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Per-inbox cap</td><td class="s ok">✓ Match</td><td>20/inbox vs their 30 — safer</td></tr>
+      <tr><td>Inbox rotation</td><td class="s ok">✓ Match</td><td>least-used pick across 12</td></tr>
+      <tr><td>Pacing &amp; warmup</td><td class="s ok">✓ Match</td><td>jitter + window + ramp</td></tr>
+      <tr><td>Bounce → suppress</td><td class="s ok">✓ Match</td><td>missing: per-inbox auto-pause</td></tr>
+      <tr><td>Verification</td><td class="s ok">✓ Match</td><td>missing: catch-all tier</td></tr>
+      <tr><td>Reply → stop + classify</td><td class="s ok">✓ Match</td><td>full Concierge</td></tr>
+      <tr><td>Out-of-office</td><td class="s warn">▲ Partial</td><td>ignores, doesn't resume-on-date</td></tr>
+      <tr><td>Duplicates</td><td class="s ok">✓ Match</td><td>3-layer dedup, built today</td></tr>
+      <tr><td>Suppression</td><td class="s warn">▲ Partial</td><td>no domain blocklist</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 9 RECREATE -->
+<section class="slide">
+  <div class="kicker">What to recreate</div>
+  <h2 class="serif">Four upgrades to close the gap</h2>
+  <div class="steps">
+    <div class="step"><div class="num">1</div><div class="body">
+      <div class="h">OOO pause-until-return-date <span class="tag hi">High · Easy</span></div>
+      <div class="p">Parse "back on July 5" and schedule the follow-up for after that date, instead of just ignoring the auto-reply.</div></div></div>
+    <div class="step"><div class="num">2</div><div class="body">
+      <div class="h">Per-inbox bounce-rate auto-pause <span class="tag hi">High · Easy</span></div>
+      <div class="p">Track each inbox's bounce %, auto-pause any box over ~3% until the list is re-verified. Protects domain health automatically.</div></div></div>
+    <div class="step"><div class="num">3</div><div class="body">
+      <div class="h">Domain blocklist + AI auto-triggers <span class="tag med">Medium</span></div>
+      <div class="p">Block whole domains, and auto-suppress on "remove me / not interested" variants — not just an exact "unsubscribe".</div></div></div>
+    <div class="step"><div class="num">4</div><div class="body">
+      <div class="h">Catch-all / role-based flagging <span class="tag med">Medium</span></div>
+      <div class="p">Tier <code>info@</code> / catch-all domains as "risky" and throttle or skip them.</div></div></div>
+  </div>
+</section>
+
+<!-- 10 THE HARD ONE -->
+<section class="slide">
+  <div class="kicker">The end-game</div>
+  <h2 class="serif">The one thing that's genuinely hard</h2>
+  <p class="lead"><b>Live reputation-feedback pool management.</b> Instantly pauses and re-ranks inboxes using real-time data from <span style="color:var(--sky)">Google Postmaster Tools</span> and <span style="color:var(--sky)">Microsoft SNDS</span>.</p>
+  <p class="sub">It needs Postmaster integration and per-domain reputation tracking — a real project, but it's the highest-end deliverability move in the category. Everything else on the list gets you to ~95% of Instantly first.</p>
+</section>
+
+<!-- 11 CLOSE -->
+<section class="slide">
+  <div class="kicker">Bottom line</div>
+  <h1 class="serif">We're already<br><em>most of the way</em> there</h1>
+  <p class="sub">Tedca OS matches Instantly on 7 of 10 edge cases today. Two quick builds — OOO resume + bounce auto-pause — close the biggest gaps. Want to start with those?</p>
+</section>
+
+<div id="nav">
+  <button class="btn" id="prev" aria-label="Previous">‹</button>
+  <div class="dots" id="dots"></div>
+  <button class="btn" id="next" aria-label="Next">›</button>
+</div>
+<div class="hint">← → or space to navigate</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  const dotsWrap=document.getElementById('dots');
+  const bar=document.getElementById('bar');
+  const count=document.getElementById('count');
+  let i=0;
+  slides.forEach((_,n)=>{const d=document.createElement('div');d.className='dot';d.onclick=()=>go(n);dotsWrap.appendChild(d);});
+  const dots=[...document.querySelectorAll('.dot')];
+  function go(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach((s,n2)=>s.classList.toggle('active',n2===i));
+    dots.forEach((d,n2)=>d.classList.toggle('on',n2===i));
+    bar.style.width=((i)/(slides.length-1)*100)+'%';
+    count.textContent=(i+1)+' / '+slides.length;
+  }
+  document.getElementById('next').onclick=()=>go(i+1);
+  document.getElementById('prev').onclick=()=>go(i-1);
+  addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){e.preventDefault();go(i+1);}
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();go(i-1);}
+    else if(e.key==='Home')go(0); else if(e.key==='End')go(slides.length-1);
+  });
+  // swipe for tablet
+  let x0=null;
+  addEventListener('touchstart',e=>x0=e.touches[0].clientX,{passive:true});
+  addEventListener('touchend',e=>{if(x0===null)return;const dx=e.changedTouches[0].clientX-x0;if(Math.abs(dx)>50)go(i+(dx<0?1:-1));x0=null;},{passive:true});
+  go(0);
+</script>
+</body>
+</html>

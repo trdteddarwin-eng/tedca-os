@@ -33,6 +33,9 @@ const WANTED = {
   TEST_RECIPIENT: local.TEST_RECIPIENT,
   OPENROUTER_API_KEY: workspace.OPENROUTER_API_KEY,
   ANYMAILFINDER_API_KEY: workspace.ANYMAILFINDER_API_KEY,
+  // tedca-os/.env is loaded last locally, so it wins over the workspace copy
+  APIFY_API_TOKEN: local.APIFY_API_TOKEN || workspace.APIFY_API_TOKEN,
+  KIE_API_KEY: workspace.KIE_API_KEY || local.KIE_API_KEY,
   TELEGRAM_BOT_TOKEN: workspace.TELEGRAM_BOT_TOKEN,
   ELEVENLABS_API_KEY: workspace.ELEVENLABS_API_KEY,
   TELEGRAM_CHAT_ID: workspace.TELEGRAM_CHAT_ID,

@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>How My Cold Email Machine Works</title>
+<style>
+  :root{
+    --bg:#0a0e1a; --bg2:#0e1424; --panel:#141c33; --panel2:#1a2440; --edge:#27314f;
+    --text:#eef1f7; --muted:#8b93a7;
+    --o:#ff6a3d; --o2:#ff9d5c; --blue:#5b8cff; --cyan:#22d3ee; --green:#34d399; --pink:#ff6aac;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+  .serif{font-family:Georgia,"Times New Roman",serif}
+  #bar{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--o),var(--o2));width:0;z-index:60;transition:width .4s ease}
+  .deck{position:fixed;inset:0}
+  .slide{position:absolute;inset:0;display:none;flex-direction:column;justify-content:center;padding:clamp(28px,5.5vw,80px);background:radial-gradient(1200px 700px at 80% -10%,#15203b 0%,var(--bg) 55%)}
+  .slide.active{display:flex}
+  .grid2{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(20px,4vw,64px);align-items:center;width:100%;max-width:1240px;margin:0 auto}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr;gap:24px}.scene{order:-1;height:230px}}
+  .step{display:inline-flex;align-items:center;gap:10px;margin-bottom:16px;opacity:0}
+  .stepnum{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--o),var(--o2));color:#160a05;display:flex;align-items:center;justify-content:center;font:800 16px ui-monospace,monospace}
+  .steplbl{font:700 12px/1 ui-monospace,monospace;letter-spacing:.24em;text-transform:uppercase;color:var(--o)}
+  h1{font-size:clamp(38px,7vw,84px);line-height:1.02;font-weight:700;letter-spacing:-.025em}
+  h2{font-size:clamp(30px,4.6vw,56px);line-height:1.04;font-weight:700;letter-spacing:-.02em;opacity:0}
+  .grad{background:linear-gradient(100deg,var(--o),#ff8a9b 55%,var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hook{font-size:clamp(17px,2.1vw,24px);color:var(--text);font-weight:600;margin-top:14px;line-height:1.35;opacity:0}
+  .body{color:var(--muted);font-size:clamp(14px,1.55vw,18px);line-height:1.6;margin-top:16px;max-width:48ch;opacity:0}
+  ul.points{list-style:none;margin-top:22px;display:flex;flex-direction:column;gap:10px}
+  ul.points li{display:flex;gap:12px;align-items:center;font-size:clamp(14px,1.55vw,18px);font-weight:500;opacity:0;transform:translateX(-10px)}
+  ul.points li .dot{width:8px;height:8px;border-radius:50%;background:var(--o);flex:none;box-shadow:0 0 10px var(--o)}
+  .slide.active .step{animation:fadeUp .5s .05s forwards}
+  .slide.active h2{animation:fadeUp .6s .12s forwards}
+  .slide.active .hook{animation:fadeUp .6s .26s forwards}
+  .slide.active .body{animation:fadeUp .6s .4s forwards}
+  .slide.active ul.points li{animation:slideIn .5s forwards}
+  .slide.active ul.points li:nth-child(1){animation-delay:.55s}
+  .slide.active ul.points li:nth-child(2){animation-delay:.68s}
+  .slide.active ul.points li:nth-child(3){animation-delay:.81s}
+  .slide.active ul.points li:nth-child(4){animation-delay:.94s}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+  @keyframes slideIn{to{opacity:1;transform:none}}
+  .scene{position:relative;width:100%;aspect-ratio:1/.82;max-height:62vh;background:linear-gradient(160deg,var(--panel),var(--bg2));border:1px solid var(--edge);border-radius:24px;overflow:hidden;box-shadow:0 30px 80px -40px #000}
+  .scene .lbl{position:absolute;font:700 10px/1 ui-monospace,monospace;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
+
+  /* TITLE */
+  #s0{align-items:flex-start}
+  .net{position:absolute;inset:0;overflow:hidden}
+  .node{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--o);opacity:.5;animation:float 6s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-18px)}}
+  .badge{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--edge);background:#ffffff08;border-radius:999px;padding:8px 16px;font:700 12px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--o);opacity:0;animation:fadeUp .6s .1s forwards}
+  #s0 h1{opacity:0;animation:fadeUp .8s .3s forwards;max-width:17ch;margin-top:22px}
+  #s0 .tag{opacity:0;animation:fadeUp .7s .7s forwards;color:var(--muted);font-size:clamp(16px,2vw,22px);margin-top:22px;max-width:42ch;line-height:1.5}
+
+  /* leads map */
+  .map{position:absolute;inset:18px;border-radius:16px;background:
+    linear-gradient(#ffffff07 1px,transparent 1px) 0 0/100% 34px,
+    linear-gradient(90deg,#ffffff07 1px,transparent 1px) 0 0/34px 100%,#0d1428}
+  .pin{position:absolute;width:14px;height:14px;border-radius:50% 50% 50% 0;transform:rotate(-45deg) scale(0);background:var(--muted);box-shadow:0 0 0 3px #0a0e1a}
+  .slide.active .pin{animation:pinIn .4s forwards}
+  .pin.good{background:var(--green)} .pin.good::after{content:"";position:absolute;inset:3px;background:#0a0e1a;border-radius:50%}
+  .pin.drop{animation:pinIn .4s forwards, pinDrop .5s 1.1s forwards}
+  @keyframes pinIn{to{transform:rotate(-45deg) scale(1)}}
+  @keyframes pinDrop{to{opacity:.12;transform:rotate(-45deg) scale(.7)}}
+  .verifChip{position:absolute;right:16px;bottom:14px;display:flex;gap:8px;align-items:center;background:#0a0e1a;border:1px solid var(--edge);border-radius:10px;padding:8px 12px;opacity:0}
+  .slide.active .verifChip{animation:fadeUp .5s 1.6s forwards}
+  .verifChip .v{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+
+  /* worker + brain */
+  .twocol{position:absolute;inset:0;display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
+  .wcard{height:78%;margin:auto;width:80%;border-radius:16px;border:1px solid var(--edge);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:14px;position:relative;background:#0e1526}
+  .stream{width:64%;height:8px;border-radius:6px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);background-size:200% 100%;animation:stream 1.6s linear infinite}
+  @keyframes stream{from{background-position:200% 0}to{background-position:-200% 0}}
+  .brain{width:74px;height:74px;border-radius:50%;background:radial-gradient(circle,var(--o),#7a2bff);position:relative}
+  .brain::before,.brain::after{content:"";position:absolute;inset:0;border-radius:50%;border:2px solid var(--o);animation:pulse 2s ease-out infinite}
+  .brain::after{animation-delay:1s}
+  @keyframes pulse{from{transform:scale(1);opacity:.8}to{transform:scale(2.1);opacity:0}}
+  .link{width:42px;height:3px;background:linear-gradient(90deg,var(--cyan),var(--o));position:relative;border-radius:3px}
+  .link .pkt{position:absolute;top:-3px;width:9px;height:9px;border-radius:50%;background:#fff;animation:travel 1.4s linear infinite}
+  @keyframes travel{from{left:-4px}to{left:38px}}
+  .tagcard{position:absolute;bottom:14px;left:0;right:0;text-align:center;font:700 11px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+
+  /* inbox grid (distribution) */
+  .ibgrid{position:absolute;inset:18px;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(3,1fr);gap:12px}
+  .cell{border-radius:12px;border:1px solid var(--edge);background:#0e1526;opacity:.7}
+  .cell.primary{border-color:var(--o);box-shadow:0 0 22px -6px var(--o);opacity:1}
+  .env{position:absolute;width:13px;height:10px;border-radius:2px;background:var(--o);box-shadow:0 0 8px var(--o)}
+  .slide.active .env{animation:fly 2.4s ease-in-out infinite}
+  @keyframes fly{0%{left:10%;top:84%;opacity:0}10%{opacity:1}80%{opacity:1}100%{left:78%;top:30%;opacity:0}}
+
+  /* richer 12-inbox grid — labeled tiles with avatars + fill bars */
+  .ibgrid2{position:absolute;inset:18px;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(3,1fr);gap:10px}
+  .ibtile{border-radius:11px;border:1px solid var(--edge);background:#0e1526;display:flex;flex-direction:column;gap:6px;padding:11px;position:relative;opacity:0}
+  .slide.active .ibtile{animation:fadeUp .4s forwards}
+  .ibtile .av{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--blue),#7a2bff);display:flex;align-items:center;justify-content:center;font:700 11px ui-monospace,monospace;color:#fff}
+  .ibtile .nm{font:600 10px ui-monospace,monospace;color:var(--muted);letter-spacing:.04em}
+  .ibtile .cap{height:5px;border-radius:5px;background:#1a2440;overflow:hidden;margin-top:auto}
+  .ibtile .cap i{display:block;height:100%;background:linear-gradient(90deg,var(--o),var(--o2))}
+  .ibtile.sending{border-color:var(--o);box-shadow:0 0 18px -6px var(--o)}
+  .ibtile.sending .av{box-shadow:0 0 0 3px #ff6a3d33}
+  .ibtile.sending::after{content:"";position:absolute;top:9px;right:9px;width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1.1s infinite}
+  @keyframes blink{50%{opacity:.25}}
+
+  /* example email mockups */
+  #sEx{align-items:center;justify-content:center}
+  #sEx .inner{width:100%;max-width:1160px;margin:0 auto;display:flex;flex-direction:column;align-items:center;text-align:center}
+  .exrow{display:grid;grid-template-columns:1fr auto 1fr;gap:18px;align-items:stretch;margin-top:34px;width:100%}
+  @media(max-width:860px){.exrow{grid-template-columns:1fr;gap:30px}.exarrow{display:none}}
+  .exmail{position:relative;background:#fff;border-radius:14px;box-shadow:0 22px 56px -28px #000;color:#1b2230;text-align:left;opacity:0}
+  .slide.active .exmail{animation:fadeUp .6s .3s forwards}
+  .slide.active .exmail:last-of-type{animation-delay:.55s}
+  .mailtag{position:absolute;top:-11px;left:16px;color:#160a05;font:700 10px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;padding:4px 10px;border-radius:6px;background:var(--o)}
+  .exmail .mh{padding:18px 16px 12px;border-bottom:1px solid #eaedf3;font:600 12px ui-monospace,monospace;color:#6b7588}
+  .exmail .mh .sub{display:block;color:#1b2230;font-weight:700;font-size:14px;margin-top:8px}
+  .exmail .mb{padding:14px 16px;font-size:13px;line-height:1.55;color:#28323f}
+  .exmail .mb p{margin-bottom:9px}
+  .exmail .mb p:last-child{margin-bottom:0}
+  .lk{display:inline-flex;align-items:center;gap:8px;margin:4px 0;background:#fff1ec;border:1px solid #ffcdb8;color:#d8521f;border-radius:8px;padding:9px 13px;font:700 12.5px ui-monospace,monospace;text-decoration:none}
+  .exarrow{display:flex;align-items:center;justify-content:center;font-size:32px;color:var(--o);font-weight:700}
+
+  /* every-reply grid (one crammed slide) */
+  #sReplies{align-items:center;justify-content:center}
+  #sReplies .inner{width:100%;max-width:1180px;margin:0 auto;text-align:center}
+  .rgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-top:28px;text-align:left}
+  @media(max-width:860px){.rgrid{grid-template-columns:1fr 1fr}}
+  @media(max-width:560px){.rgrid{grid-template-columns:1fr}}
+  .rcard{background:var(--panel);border:1px solid var(--edge);border-radius:13px;padding:15px 16px;opacity:0}
+  .slide.active .rcard{animation:fadeUp .45s forwards}
+  .slide.active .rcard:nth-child(1){animation-delay:.28s}.slide.active .rcard:nth-child(2){animation-delay:.36s}
+  .slide.active .rcard:nth-child(3){animation-delay:.44s}.slide.active .rcard:nth-child(4){animation-delay:.52s}
+  .slide.active .rcard:nth-child(5){animation-delay:.60s}.slide.active .rcard:nth-child(6){animation-delay:.68s}
+  .slide.active .rcard:nth-child(7){animation-delay:.76s}.slide.active .rcard:nth-child(8){animation-delay:.84s}
+  .tagb{display:inline-block;font:700 9px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;padding:4px 9px;border-radius:6px;margin-bottom:10px}
+  .tagb.auto{background:#34d39922;color:var(--green)}
+  .tagb.silent{background:#f6c4531f;color:#f6c453}
+  .tagb.human{background:#ff6a3d22;color:var(--o)}
+  .rcard .trig{font-size:14px;font-weight:700;color:var(--text);line-height:1.3}
+  .rcard .act{font-size:12.5px;color:var(--muted);margin-top:7px;line-height:1.45}
+
+  /* deliverability: warmed inboxes + sunrise */
+  .sun{position:absolute;left:50%;bottom:-60px;transform:translateX(-50%);width:240px;height:240px;border-radius:50%;background:radial-gradient(circle at 50% 40%,#ff9d5c,#ff6a3d 45%,transparent 70%);opacity:.45}
+  .inboxRow{position:absolute;left:0;right:0;top:34%;display:flex;justify-content:center;gap:14px}
+  .ibx{width:46px;height:36px;border-radius:8px;border:1px solid var(--edge);background:#0e1526;position:relative;opacity:.35}
+  .ibx::after{content:"";position:absolute;left:8px;right:8px;top:9px;height:3px;border-radius:3px;background:var(--muted)}
+  .slide.active .ibx{animation:lightUp .5s forwards}
+  .slide.active .ibx:nth-child(1){animation-delay:.5s}.slide.active .ibx:nth-child(2){animation-delay:.75s}
+  .slide.active .ibx:nth-child(3){animation-delay:1s}.slide.active .ibx:nth-child(4){animation-delay:1.25s}.slide.active .ibx:nth-child(5){animation-delay:1.5s}
+  @keyframes lightUp{to{opacity:1;border-color:var(--green);box-shadow:0 0 18px -4px var(--green)}}
+  .landTag{position:absolute;left:50%;bottom:40px;transform:translateX(-50%);padding:9px 18px;border-radius:999px;background:#0e1526;border:1px solid var(--green);color:var(--green);font:700 12px ui-monospace,monospace;letter-spacing:.08em;opacity:0}
+  .slide.active .landTag{animation:fadeUp .5s 1.7s forwards}
+
+  /* replies */
+  .replyNode{position:absolute;left:13%;top:50%;transform:translateY(-50%);padding:12px 16px;border-radius:12px;background:#0e1526;border:1px solid var(--o);color:var(--o);font:700 12px ui-monospace,monospace;letter-spacing:.1em}
+  .leaf{position:absolute;right:12%;padding:8px 12px;border-radius:9px;background:#0e1526;border:1px solid var(--edge);font:600 12px ui-monospace,monospace;color:var(--muted);opacity:0}
+  .slide.active .leaf{animation:fadeUp .5s forwards}
+  .slide.active .leaf:nth-of-type(1){animation-delay:.6s}.slide.active .leaf:nth-of-type(2){animation-delay:.8s}
+  .slide.active .leaf:nth-of-type(3){animation-delay:1s}.slide.active .leaf:nth-of-type(4){animation-delay:1.2s}
+  .leaf.hot{border-color:var(--green);color:var(--green);box-shadow:0 0 18px -6px var(--green)}
+  .typing{position:absolute;right:8%;bottom:13%;font:600 12px ui-monospace,monospace;color:var(--green);opacity:0;white-space:nowrap;overflow:hidden;border-right:2px solid var(--green)}
+  .slide.active .typing{animation:show .1s 1.5s forwards, type 1.6s 1.5s steps(22) forwards}
+  @keyframes show{to{opacity:1}}
+  @keyframes type{from{width:0}to{width:15ch}}
+
+  /* loop */
+  .ring{position:absolute;inset:0;margin:auto;width:300px;height:300px}
+  .lnode{position:absolute;left:50%;top:50%;width:0;height:0}
+  .lnode b{position:absolute;width:46px;height:46px;margin:-23px;border-radius:50%;border:1px solid var(--edge);background:#0e1526;display:flex;align-items:center;justify-content:center;font:700 11px ui-monospace,monospace;color:var(--muted);opacity:.4}
+  .slide.active .lnode b{animation:litNode .4s forwards}
+  .center{position:absolute;inset:0;margin:auto;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,#1a2440,#0e1526);border:1px solid var(--o);display:flex;align-items:center;justify-content:center;text-align:center;font:700 12px ui-monospace,monospace;color:var(--o);box-shadow:0 0 40px -10px var(--o)}
+  @keyframes litNode{to{opacity:1;border-color:var(--o);color:var(--text);box-shadow:0 0 16px -4px var(--o)}}
+
+  #s6 .txt .stamp{display:inline-block;margin-top:22px;font:700 12px ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--o);opacity:0}
+  .slide.active #s6stamp,.slide.active .txt .stamp{animation:fadeUp .6s 1.05s forwards}
+
+  .brand{position:fixed;top:20px;left:26px;font-size:16px;z-index:50}
+  .brand b{font-weight:700}.brand em{font-style:italic;color:var(--o)}
+  #count{position:fixed;top:20px;right:26px;font:700 12px ui-monospace,monospace;color:var(--muted);z-index:50}
+  #nav{position:fixed;bottom:22px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:16px;z-index:50}
+  .btn{background:var(--panel);border:1px solid var(--edge);color:var(--text);height:40px;min-width:40px;padding:0 14px;border-radius:11px;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+  .btn:hover{border-color:var(--o);color:var(--o)}
+  .btn .t{font:700 11px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase}
+  .dots{display:flex;gap:7px}
+  .pdot{width:7px;height:7px;border-radius:50%;background:#2b3554;cursor:pointer}
+  .pdot.on{background:var(--o);transform:scale(1.4)}
+  .hint{position:fixed;bottom:24px;right:26px;font:11px ui-monospace,monospace;color:#4a5577;z-index:50}
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div class="brand serif"><b>Tedca</b> <em>OS</em></div>
+<div id="count"></div>
+<div class="deck" id="deck">
+
+  <!-- 0 TITLE -->
+  <section class="slide" id="s0">
+    <div class="net" id="net"></div>
+    <span class="badge">⚙ My homemade Instantly</span>
+    <h1 class="serif">How my <span class="grad">cold email machine</span> works.</h1>
+    <p class="tag">I built my own version of Instantly. Here is exactly how it runs, step by step.</p>
+  </section>
+
+  <!-- 1 STEP 1 - LEADS -->
+  <section class="slide" id="s1">
+    <div class="grid2">
+      <div class="txt">
+        <div class="step"><span class="stepnum">1</span><span class="steplbl">Get the leads</span></div>
+        <h2 class="serif">We pull leads <span class="grad">automatically</span></h2>
+        <div class="hook">We have a system running that gets us leads on its own.</div>
+        <div class="body">It scrapes Google Maps for the businesses we want. Then it runs each one through AnyMailFinder to get the decision-maker's real email and their LinkedIn.</div>
+        <ul class="points">
+          <li><span class="dot"></span>Scrapes Google Maps for our target businesses</li>
+          <li><span class="dot"></span>Runs each one through AnyMailFinder</li>
+          <li><span class="dot"></span>Gets the decision-maker's real email</li>
+          <li><span class="dot"></span>Plus their LinkedIn profile</li>
+        </ul>
+      </div>
+      <div class="scene"><div class="map" id="map"></div>
+        <div class="verifChip"><span class="v"></span><span style="font:600 11px ui-monospace,monospace;color:#eef1f7">owner@business.com · found</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 STEP 2 - SORT + WRITE -->
+  <section class="slide" id="s2">
+    <div class="grid2">
+      <div class="txt">
+        <div class="step"><span class="stepnum">2</span><span class="steplbl">Sort it and write</span></div>
+        <h2 class="serif">A worker sorts it, <span class="grad">Claude writes</span></h2>
+        <div class="hook">A worker pulls all that lead data from step 1 and sorts it.</div>
+        <div class="body">Then Claude takes over. Haiku writes the outbound email, and Sonnet writes the reply when the lead writes back. Both run through OpenRouter.</div>
+        <ul class="points">
+          <li><span class="dot"></span>Worker pulls and sorts all the lead data</li>
+          <li><span class="dot"></span>Haiku writes the outbound email</li>
+          <li><span class="dot"></span>Sonnet writes the reply when they respond</li>
+          <li><span class="dot"></span>Both powered by Claude, via OpenRouter</li>
+        </ul>
+      </div>
+      <div class="scene">
+        <div class="twocol">
+          <div class="wcard"><span class="lbl" style="top:14px;left:14px">Worker</span><div class="stream"></div><div class="stream" style="animation-delay:.3s"></div><div class="stream" style="animation-delay:.6s"></div></div>
+          <div class="link"><span class="pkt"></span></div>
+          <div class="wcard"><span class="lbl" style="top:14px;left:14px">Claude</span><div class="brain"></div></div>
+        </div>
+        <div class="tagcard">Haiku writes · Sonnet replies · via OpenRouter</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 STEP 3 - SEND + DISTRIBUTE -->
+  <section class="slide" id="s3">
+    <div class="grid2">
+      <div class="txt">
+        <div class="step"><span class="stepnum">3</span><span class="steplbl">Send it the right way</span></div>
+        <h2 class="serif">Spread across <span class="grad">12 inboxes</span></h2>
+        <div class="hook">The emails go out across 12 inboxes, never from just one.</div>
+        <div class="body">The system rotates evenly between them, with guardrails built in so we never email the same person twice and never double-send. Every inbox has a daily limit so none gets overused.</div>
+        <ul class="points">
+          <li><span class="dot"></span>Spread across 12 inboxes, not one</li>
+          <li><span class="dot"></span>Rotates evenly between them</li>
+          <li><span class="dot"></span>Never emails the same person twice</li>
+          <li><span class="dot"></span>A daily cap on every inbox</li>
+        </ul>
+      </div>
+      <div class="scene">
+        <div class="ibgrid2">
+          <div class="ibtile" style="animation-delay:.40s"><span class="av">A</span><span class="nm">ava</span><span class="cap"><i style="width:62%"></i></span></div>
+          <div class="ibtile" style="animation-delay:.46s"><span class="av">B</span><span class="nm">ben</span><span class="cap"><i style="width:48%"></i></span></div>
+          <div class="ibtile sending" style="animation-delay:.52s"><span class="av">C</span><span class="nm">cole</span><span class="cap"><i style="width:71%"></i></span></div>
+          <div class="ibtile" style="animation-delay:.58s"><span class="av">D</span><span class="nm">dani</span><span class="cap"><i style="width:55%"></i></span></div>
+          <div class="ibtile" style="animation-delay:.64s"><span class="av">E</span><span class="nm">eli</span><span class="cap"><i style="width:67%"></i></span></div>
+          <div class="ibtile sending" style="animation-delay:.70s"><span class="av">F</span><span class="nm">faye</span><span class="cap"><i style="width:43%"></i></span></div>
+          <div class="ibtile" style="animation-delay:.76s"><span class="av">G</span><span class="nm">gigi</span><span class="cap"><i style="width:59%"></i></span></div>
+          <div class="ibtile" style="animation-delay:.82s"><span class="av">H</span><span class="nm">hank</span><span class="cap"><i style="width:50%"></i></span></div>
+          <div class="ibtile" style="animation-delay:.88s"><span class="av">I</span><span class="nm">ivy</span><span class="cap"><i style="width:64%"></i></span></div>
+          <div class="ibtile sending" style="animation-delay:.94s"><span class="av">J</span><span class="nm">jude</span><span class="cap"><i style="width:38%"></i></span></div>
+          <div class="ibtile" style="animation-delay:1.0s"><span class="av">K</span><span class="nm">kira</span><span class="cap"><i style="width:72%"></i></span></div>
+          <div class="ibtile" style="animation-delay:1.06s"><span class="av">L</span><span class="nm">leo</span><span class="cap"><i style="width:46%"></i></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 STEP 4 - DELIVERABILITY -->
+  <section class="slide" id="s4">
+    <div class="grid2">
+      <div class="txt">
+        <div class="step"><span class="stepnum">4</span><span class="steplbl">Make sure it lands</span></div>
+        <h2 class="serif">Built to land in the <span class="grad">inbox</span></h2>
+        <div class="hook">Everything is set up so the emails land in the inbox, not spam.</div>
+        <div class="body">The inboxes are warmed up first. The sending is paced like a real person typing, with random spacing between every email so it never looks like a blast.</div>
+        <ul class="points">
+          <li><span class="dot"></span>Inboxes warmed up before any sending</li>
+          <li><span class="dot"></span>Paced like a real person, not a machine</li>
+          <li><span class="dot"></span>Random spacing between every send</li>
+          <li><span class="dot"></span>Built to land in the primary inbox</li>
+        </ul>
+      </div>
+      <div class="scene">
+        <div class="sun"></div>
+        <div class="inboxRow"><div class="ibx"></div><div class="ibx"></div><div class="ibx"></div><div class="ibx"></div><div class="ibx"></div></div>
+        <div class="landTag">✓ lands in primary inbox</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 STEP 5 - REPLIES -->
+  <section class="slide" id="s5">
+    <div class="grid2">
+      <div class="txt">
+        <div class="step"><span class="stepnum">5</span><span class="steplbl">Handle the replies</span></div>
+        <h2 class="serif">An AI agent <span class="grad">replies for us</span></h2>
+        <div class="hook">When a lead writes back, the system reads it and figures out what they want.</div>
+        <div class="body">If they are interested, our AI agent writes and sends the auto-reply for us. Anything sensitive goes to a human. The whole thing runs on its own, 8am to 5pm on weekdays.</div>
+        <ul class="points">
+          <li><span class="dot"></span>Reads and filters every reply</li>
+          <li><span class="dot"></span>AI agent sends the auto-reply for us</li>
+          <li><span class="dot"></span>Anything sensitive goes to a human</li>
+          <li><span class="dot"></span>Runs 8am to 5pm, weekdays</li>
+        </ul>
+      </div>
+      <div class="scene">
+        <div class="replyNode">REPLY</div>
+        <div class="leaf hot" style="top:18%">✓ interested</div>
+        <div class="leaf" style="top:38%">✕ not now</div>
+        <div class="leaf" style="top:58%">⏾ away</div>
+        <div class="leaf" style="top:78%">⊘ unsubscribe</div>
+        <div class="typing">hey, happy to walk you through it…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- EVERY REPLY - one crammed slide -->
+  <section class="slide" id="sReplies">
+    <div class="inner">
+      <div class="step" style="justify-content:center"><span class="stepnum">↩</span><span class="steplbl">How it handles every reply</span></div>
+      <h2 class="serif">Every reply, <span class="grad">handled</span></h2>
+      <div class="rgrid">
+        <div class="rcard"><span class="tagb auto">Auto-reply</span><div class="trig">"interested · tell me more"</div><div class="act">Sends a tailored, human reply with the reactivation link.</div></div>
+        <div class="rcard"><span class="tagb auto">Auto-reply</span><div class="trig">"what does it cost?"</div><div class="act">Says it's performance-based, never a number, and points to the link.</div></div>
+        <div class="rcard"><span class="tagb auto">Auto-reply</span><div class="trig">"does it really work?"</div><div class="act">Cites the Union, NJ proof and sends the link.</div></div>
+        <div class="rcard"><span class="tagb silent">Ignored</span><div class="trig">Out-of-office</div><div class="act">Skips it and keeps the follow-up sequence running.</div></div>
+        <div class="rcard"><span class="tagb silent">Suppressed</span><div class="trig">"unsubscribe · remove me"</div><div class="act">Marked do-not-contact forever. No reply sent.</div></div>
+        <div class="rcard"><span class="tagb human">To a human</span><div class="trig">"not interested · stop"</div><div class="act">Flagged to me, no auto-reply, follow-ups stopped.</div></div>
+        <div class="rcard"><span class="tagb human">To a human</span><div class="trig">"are you a bot?" · legal · refund</div><div class="act">Goes straight to me. The AI never answers these.</div></div>
+        <div class="rcard"><span class="tagb human">Safety net</span><div class="trig">A price or guarantee slips into a draft</div><div class="act">Blocked and escalated to me before it can send.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- EXAMPLE - what it says + the link -->
+  <section class="slide" id="sEx">
+    <div class="inner">
+      <div class="step"><span class="stepnum">✉</span><span class="steplbl">What it actually says</span></div>
+      <h2 class="serif">Here's a <span class="grad">real example</span></h2>
+      <div class="exrow">
+        <div class="exmail">
+          <div class="mailtag">the cold email it sends</div>
+          <div class="mh">From: Beth &nbsp;·&nbsp; To: Glow Med Spa<span class="sub">reactivating Glow Med Spa's past clients</span></div>
+          <div class="mb">
+            <p>hey Sarah,</p>
+            <p>came across Glow Med Spa, 4.8 stars across 120 reviews is no joke.</p>
+            <p>i build database reactivation systems for med spas to bring back past clients without running a single ad. just did this for a med spa in Union, NJ and brought back 5 past clients in 30 days.</p>
+            <p>best part is, you only pay when it works.</p>
+            <p>open to a short walkthrough?</p>
+          </div>
+        </div>
+        <div class="exarrow">&rarr;</div>
+        <div class="exmail">
+          <div class="mailtag" style="background:var(--green);color:#04140d">the reply + link it sends</div>
+          <div class="mh">when they reply "yes, interested"<span class="sub">Re: reactivating Glow Med Spa's past clients</span></div>
+          <div class="mb">
+            <p>happy to walk you through it. quick version: we bring back your past clients with the list you already have, no ad spend, and you only pay when it works.</p>
+            <p>here's the rundown:</p>
+            <a class="lk" href="https://database-reactivation-nine.vercel.app">&#128279; database-reactivation-nine.vercel.app</a>
+            <p>want to grab 10 min this week?</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 CLOSE - RUNS ITSELF -->
+  <section class="slide" id="s6">
+    <div class="grid2">
+      <div class="txt">
+        <div class="step"><span class="stepnum">✦</span><span class="steplbl">All of it together</span></div>
+        <h2 class="serif">A system that <span class="grad">runs itself</span></h2>
+        <div class="hook">Put it together and the whole thing is automated.</div>
+        <div class="body">It finds leads, writes, sends, and replies on its own, all powered by AI through OpenRouter. It even pings me on Telegram the moment it is done. I just show up to close.</div>
+        <span class="stamp" id="s6stamp">Fully automated · powered by AI via OpenRouter</span>
+      </div>
+      <div class="scene">
+        <div class="ring" id="ring"></div>
+        <div class="center">RUNS<br>ITSELF</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div id="nav">
+  <button class="btn" id="prev">‹</button>
+  <button class="btn" id="play"><span class="t" id="playt">▶ Auto</span></button>
+  <div class="dots" id="dots"></div>
+  <button class="btn" id="next">›</button>
+</div>
+<div class="hint">← → to move · Auto to play</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  const dotsWrap=document.getElementById('dots'),bar=document.getElementById('bar'),count=document.getElementById('count');
+  let i=0,auto=false,timer=null;
+  const net=document.getElementById('net');
+  for(let n=0;n<26;n++){const d=document.createElement('div');d.className='node';d.style.left=(8+(n*37)%88)+'%';d.style.top=(10+(n*53)%80)+'%';d.style.animationDelay=(n*0.2)+'s';d.style.background=['#ff6a3d','#5b8cff','#22d3ee'][n%3];net.appendChild(d);}
+  const map=document.getElementById('map');
+  const pinSpots=[[18,22],[40,16],[62,28],[80,20],[26,48],[52,44],[72,52],[34,70],[58,72],[80,68],[14,60],[46,62]];
+  pinSpots.forEach((p,n)=>{const el=document.createElement('div');el.className='pin '+(n%5===0||n%7===0?'drop':'good');el.style.left=p[0]+'%';el.style.top=p[1]+'%';el.style.animationDelay=(0.2+n*0.09)+'s';map.appendChild(el);});
+  const ring=document.getElementById('ring');
+  const labels=['FIND','VERIFY','WRITE','SEND','FOLLOW','READ','REPLY','CLOSE'];
+  labels.forEach((t,n)=>{const a=(n/8)*Math.PI*2 - Math.PI/2;const r=130;const w=document.createElement('div');w.className='lnode';const b=document.createElement('b');b.textContent=t;b.style.left=(Math.cos(a)*r)+'px';b.style.top=(Math.sin(a)*r)+'px';b.style.animationDelay=(0.3+n*0.18)+'s';w.appendChild(b);ring.appendChild(w);});
+  slides.forEach((_,n)=>{const d=document.createElement('div');d.className='pdot';d.onclick=()=>go(n);dotsWrap.appendChild(d);});
+  const dots=[...document.querySelectorAll('.pdot')];
+  function go(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach(s=>s.classList.remove('active'));
+    void slides[i].offsetWidth;
+    slides[i].classList.add('active');
+    dots.forEach((d,k)=>d.classList.toggle('on',k===i));
+    bar.style.width=(i/(slides.length-1)*100)+'%';
+    count.textContent=(i+1)+' / '+slides.length;
+  }
+  document.getElementById('next').onclick=()=>go(i+1);
+  document.getElementById('prev').onclick=()=>go(i-1);
+  function setAuto(on){auto=on;document.getElementById('playt').textContent=on?'❚❚ Stop':'▶ Auto';
+    if(timer){clearInterval(timer);timer=null;}
+    if(on)timer=setInterval(()=>{ if(i>=slides.length-1){go(0);} else go(i+1); },6500);}
+  document.getElementById('play').onclick=()=>setAuto(!auto);
+  addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();go(i+1);}else if(e.key==='ArrowLeft'){go(i-1);}else if(e.key==='Home')go(0);else if(e.key==='End')go(slides.length-1);});
+  let x0=null;addEventListener('touchstart',e=>x0=e.touches[0].clientX,{passive:true});
+  addEventListener('touchend',e=>{if(x0===null)return;const dx=e.changedTouches[0].clientX-x0;if(Math.abs(dx)>50)go(i+(dx<0?1:-1));x0=null;},{passive:true});
+  go(0);
+</script>
+</body>
+</html>

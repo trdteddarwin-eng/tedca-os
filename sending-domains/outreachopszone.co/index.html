@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Outreach Ops Zone is a boutique B2B outreach and sales-operations consultancy that builds and runs outbound systems for growing companies.">
+<title>Outreach Ops Zone | B2B Outbound Systems and Sales Ops</title>
+<style>
+  :root {
+    --ink: #14202e;
+    --slate: #475569;
+    --mist: #64748b;
+    --line: #e2e8f0;
+    --paper: #ffffff;
+    --canvas: #f6f8fb;
+    --brand: #1f5f8b;
+    --brand-deep: #143d5c;
+    --accent: #2bb6a3;
+    --shadow: 0 18px 40px -22px rgba(20, 32, 46, 0.4);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  .wrap {
+    width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* Header */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: saturate(180%) blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 70px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 700;
+    font-size: 1.12rem;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  .mark {
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+  }
+  .nav-links a {
+    font-size: 0.93rem;
+    color: var(--slate);
+    font-weight: 500;
+    transition: color 0.15s ease;
+  }
+  .nav-links a:hover { color: var(--brand); }
+  .nav-cta {
+    display: inline-block;
+    padding: 9px 18px;
+    border-radius: 8px;
+    background: var(--brand);
+    color: #fff !important;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  .nav-cta:hover { background: var(--brand-deep); }
+  .nav-toggle { display: none; }
+
+  /* Hero */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(900px 460px at 82% -8%, rgba(43, 182, 163, 0.16), transparent 62%),
+      radial-gradient(720px 520px at 8% 12%, rgba(31, 95, 139, 0.12), transparent 60%),
+      var(--canvas);
+    border-bottom: 1px solid var(--line);
+  }
+  .hero-inner {
+    display: grid;
+    grid-template-columns: 1.12fr 0.88fr;
+    gap: 56px;
+    align-items: center;
+    padding: 92px 0 96px;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--brand);
+    background: rgba(31, 95, 139, 0.08);
+    border: 1px solid rgba(31, 95, 139, 0.16);
+    padding: 6px 14px;
+    border-radius: 999px;
+    margin-bottom: 22px;
+  }
+  .eyebrow .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+  }
+  .hero h1 {
+    font-size: clamp(2.1rem, 4.6vw, 3.25rem);
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+    margin-bottom: 22px;
+  }
+  .hero h1 .hl { color: var(--brand); }
+  .hero p.lead {
+    font-size: 1.13rem;
+    color: var(--slate);
+    max-width: 540px;
+    margin-bottom: 32px;
+  }
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+  }
+  .btn-primary {
+    display: inline-block;
+    padding: 14px 26px;
+    border-radius: 10px;
+    background: var(--brand);
+    color: #fff;
+    font-weight: 600;
+    font-size: 1rem;
+    box-shadow: var(--shadow);
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  .btn-primary:hover { background: var(--brand-deep); transform: translateY(-1px); }
+  .btn-ghost {
+    display: inline-block;
+    padding: 14px 22px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    font-weight: 600;
+    font-size: 1rem;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .btn-ghost:hover { border-color: var(--brand); color: var(--brand); }
+
+  .hero-stats {
+    display: flex;
+    gap: 34px;
+    margin-top: 44px;
+    flex-wrap: wrap;
+  }
+  .hero-stats .stat .num {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+  }
+  .hero-stats .stat .label {
+    font-size: 0.84rem;
+    color: var(--mist);
+  }
+
+  /* Hero visual panel */
+  .hero-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 22px;
+  }
+  .hero-card .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .hero-card .card-head span {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--mist);
+    letter-spacing: 0.02em;
+  }
+  .pill {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: rgba(43, 182, 163, 0.12);
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+  .stage {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 0;
+    font-size: 0.9rem;
+  }
+  .stage + .stage { border-top: 1px dashed var(--line); }
+  .stage .name { color: var(--slate); font-weight: 500; }
+  .stage .count { color: var(--ink); font-weight: 700; }
+  .bar {
+    height: 8px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--brand), var(--accent));
+    margin-top: 6px;
+  }
+  .stage-row { padding: 12px 0; }
+  .stage-row + .stage-row { border-top: 1px dashed var(--line); }
+  .stage-row .top {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 0.9rem; margin-bottom: 2px;
+  }
+  .stage-row .name { color: var(--slate); font-weight: 500; }
+  .stage-row .count { color: var(--ink); font-weight: 700; }
+
+  /* Sections */
+  section { padding: 86px 0; }
+  .section-head {
+    max-width: 660px;
+    margin: 0 auto 54px;
+    text-align: center;
+  }
+  .kicker {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .section-head h2 {
+    font-size: clamp(1.7rem, 3.2vw, 2.3rem);
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin-bottom: 16px;
+  }
+  .section-head p {
+    color: var(--slate);
+    font-size: 1.05rem;
+  }
+
+  /* Services */
+  #services { background: var(--canvas); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 26px;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 32px 28px;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow);
+    border-color: rgba(31, 95, 139, 0.3);
+  }
+  .icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(31,95,139,0.1), rgba(43,182,163,0.12));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+  .icon svg { width: 26px; height: 26px; stroke: var(--brand); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .card h3 {
+    font-size: 1.2rem;
+    letter-spacing: -0.01em;
+    margin-bottom: 11px;
+  }
+  .card p { color: var(--slate); font-size: 0.97rem; margin-bottom: 16px; }
+  .card ul { list-style: none; }
+  .card li {
+    font-size: 0.9rem;
+    color: var(--mist);
+    padding-left: 22px;
+    position: relative;
+    margin-bottom: 7px;
+  }
+  .card li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 8px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* About */
+  .about-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 60px;
+    align-items: center;
+  }
+  .about-copy h2 {
+    font-size: clamp(1.7rem, 3vw, 2.2rem);
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin-bottom: 20px;
+  }
+  .about-copy p { color: var(--slate); margin-bottom: 18px; font-size: 1.03rem; }
+  .about-copy p strong { color: var(--ink); }
+  .principles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  .principle {
+    background: var(--canvas);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 22px;
+  }
+  .principle .h {
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 6px;
+    font-size: 1rem;
+  }
+  .principle .d { font-size: 0.9rem; color: var(--mist); }
+
+  /* Contact */
+  #contact {
+    background:
+      radial-gradient(700px 420px at 85% 0%, rgba(43,182,163,0.14), transparent 60%),
+      linear-gradient(160deg, var(--brand-deep), var(--ink));
+    color: #fff;
+  }
+  #contact .section-head h2 { color: #fff; }
+  #contact .section-head .kicker { color: #7fe0d3; }
+  #contact .section-head p { color: #c4d2df; }
+  .contact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    align-items: stretch;
+    max-width: 940px;
+    margin: 0 auto;
+  }
+  .contact-card {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 16px;
+    padding: 34px;
+    backdrop-filter: blur(4px);
+  }
+  .contact-card h3 { font-size: 1.25rem; margin-bottom: 14px; letter-spacing: -0.01em; }
+  .contact-card p { color: #c4d2df; font-size: 0.98rem; margin-bottom: 22px; }
+  .contact-line {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 0;
+    border-top: 1px solid rgba(255,255,255,0.12);
+  }
+  .contact-line:last-child { border-bottom: 1px solid rgba(255,255,255,0.12); }
+  .contact-line .ci {
+    width: 38px; height: 38px; flex: none;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .contact-line .ci svg { width: 19px; height: 19px; stroke: #7fe0d3; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .contact-line .ct .l { font-size: 0.76rem; color: #9fb3c2; text-transform: uppercase; letter-spacing: 0.06em; }
+  .contact-line .ct .v { font-size: 0.98rem; color: #fff; font-weight: 600; }
+  .contact-line .ct a.v:hover { color: #7fe0d3; }
+  .contact-btn {
+    display: inline-block;
+    margin-top: 26px;
+    padding: 14px 26px;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--brand-deep);
+    font-weight: 700;
+    font-size: 1rem;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .contact-btn:hover { transform: translateY(-1px); background: #eef6f4; }
+  .steps { list-style: none; counter-reset: step; }
+  .steps li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 24px 48px;
+    color: #c4d2df;
+    font-size: 0.96rem;
+  }
+  .steps li:last-child { padding-bottom: 0; }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0; top: -2px;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .steps li::after {
+    content: "";
+    position: absolute;
+    left: 15px; top: 32px; bottom: 6px;
+    width: 1px;
+    background: rgba(255,255,255,0.14);
+  }
+  .steps li:last-child::after { display: none; }
+  .steps li strong { color: #fff; display: block; margin-bottom: 2px; }
+
+  /* Footer */
+  footer {
+    background: var(--ink);
+    color: #9fb3c2;
+    padding: 44px 0 30px;
+  }
+  .foot-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding-bottom: 26px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .foot-brand { display: flex; align-items: center; gap: 12px; color: #fff; font-weight: 700; }
+  .foot-links { display: flex; gap: 26px; flex-wrap: wrap; }
+  .foot-links a { font-size: 0.92rem; color: #c4d2df; }
+  .foot-links a:hover { color: #fff; }
+  .foot-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-top: 22px;
+    font-size: 0.85rem;
+  }
+  .foot-bottom a:hover { color: #fff; }
+
+  @media (max-width: 880px) {
+    .hero-inner { grid-template-columns: 1fr; gap: 44px; padding: 64px 0 70px; }
+    .hero-visual { order: -1; }
+    .cards { grid-template-columns: 1fr; }
+    .about-grid { grid-template-columns: 1fr; gap: 38px; }
+    .contact-grid { grid-template-columns: 1fr; }
+    .nav-links { display: none; }
+  }
+  @media (max-width: 520px) {
+    .principles { grid-template-columns: 1fr; }
+    .hero-stats { gap: 24px; }
+    section { padding: 64px 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top" aria-label="Outreach Ops Zone home">
+      <span class="mark" aria-hidden="true"></span>
+      Outreach Ops Zone
+    </a>
+    <nav class="nav-links">
+      <a href="#services">Services</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+      <a class="nav-cta" href="#contact">Book a call</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero" style="padding:0;">
+    <div class="wrap">
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <span class="eyebrow"><span class="dot"></span> B2B Outreach and Sales Ops</span>
+          <h1>Outbound systems that <span class="hl">book qualified meetings</span>, run on their own.</h1>
+          <p class="lead">We are a boutique consultancy that designs, builds, and operates the outbound engine behind your pipeline. From list strategy and messaging to deliverability and reporting, we install a system your team can actually rely on.</p>
+          <div class="hero-actions">
+            <a class="btn-primary" href="#contact">Start a conversation</a>
+            <a class="btn-ghost" href="#services">See how it works</a>
+          </div>
+          <div class="hero-stats">
+            <div class="stat">
+              <div class="num">12+</div>
+              <div class="label">Outbound programs run end to end</div>
+            </div>
+            <div class="stat">
+              <div class="num">30 days</div>
+              <div class="label">From kickoff to live campaigns</div>
+            </div>
+            <div class="stat">
+              <div class="num">1 team</div>
+              <div class="label">Strategy, build, and operation in one</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <div class="hero-card" role="img" aria-label="Sample outbound pipeline snapshot">
+            <div class="card-head">
+              <span>Pipeline snapshot</span>
+              <span class="pill">Last 30 days</span>
+            </div>
+            <div class="stage-row">
+              <div class="top"><span class="name">Accounts targeted</span><span class="count">1,840</span></div>
+              <div class="bar" style="width:100%;"></div>
+            </div>
+            <div class="stage-row">
+              <div class="top"><span class="name">Contacts engaged</span><span class="count">1,205</span></div>
+              <div class="bar" style="width:74%;"></div>
+            </div>
+            <div class="stage-row">
+              <div class="top"><span class="name">Positive replies</span><span class="count">218</span></div>
+              <div class="bar" style="width:38%;"></div>
+            </div>
+            <div class="stage-row">
+              <div class="top"><span class="name">Meetings booked</span><span class="count">61</span></div>
+              <div class="bar" style="width:22%;"></div>
+            </div>
+            <div class="stage-row">
+              <div class="top"><span class="name">Opportunities created</span><span class="count">19</span></div>
+              <div class="bar" style="width:12%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SERVICES -->
+  <section id="services">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker">What we do</div>
+        <h2>Three ways we build your outbound motion</h2>
+        <p>Every engagement is hands on. We do not hand you a slide deck and disappear. We build the system, get it producing, and document it so your team can keep it running.</p>
+      </div>
+      <div class="cards">
+
+        <div class="card">
+          <div class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+          </div>
+          <h3>Outbound Strategy and Build</h3>
+          <p>We define your ideal customer, build accurate target lists, and write messaging that earns replies. Then we stand up the full sending infrastructure end to end.</p>
+          <ul>
+            <li>ICP definition and segment mapping</li>
+            <li>List sourcing and data enrichment</li>
+            <li>Multichannel sequences across email and LinkedIn</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
+          </div>
+          <h3>Managed Sending and Deliverability</h3>
+          <p>We run the day to day so your reps stay focused on calls. Inbox health, warmup, and quality control are handled by us, with replies routed straight to your team.</p>
+          <ul>
+            <li>Domain and inbox warmup management</li>
+            <li>Deliverability monitoring and spam testing</li>
+            <li>Reply handling and meeting handoff</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16v4H4z"/><path d="M4 12h10v8H4z"/><path d="M18 12h2v8h-2z"/></svg>
+          </div>
+          <h3>Sales Ops and Reporting</h3>
+          <p>We connect outbound to your CRM so nothing slips and every meeting is tracked. You get clean data, clear attribution, and a weekly view of what is actually working.</p>
+          <ul>
+            <li>CRM setup, cleanup, and pipeline stages</li>
+            <li>Lead routing and follow up automation</li>
+            <li>Weekly reporting and channel attribution</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ABOUT -->
+  <section id="about">
+    <div class="wrap about-grid">
+      <div class="about-copy">
+        <div class="kicker">About us</div>
+        <h2>A small, senior team that treats your pipeline like its own.</h2>
+        <p>Outreach Ops Zone was founded by operators who spent years inside revenue teams, watching good products stall because outbound was inconsistent and nobody owned it. We started this practice to fix that for a handful of companies at a time.</p>
+        <p>We deliberately keep our roster small. <strong>You work directly with the people doing the work</strong>, not a rotating cast of account managers. That means faster decisions, sharper messaging, and a system that fits how your team actually sells.</p>
+        <p>Whether you are launching outbound for the first time or rebuilding a program that stopped producing, we bring the structure, tooling, and steady hands to get it running and keep it that way.</p>
+      </div>
+      <div class="principles">
+        <div class="principle">
+          <div class="h">Systems over heroics</div>
+          <div class="d">Repeatable process beats a lucky month. We build for consistency you can forecast against.</div>
+        </div>
+        <div class="principle">
+          <div class="h">Quality over volume</div>
+          <div class="d">Tight targeting and clean data protect your domain and your brand reputation.</div>
+        </div>
+        <div class="principle">
+          <div class="h">Plain reporting</div>
+          <div class="d">Clear numbers every week. You always know what is working and what we are changing.</div>
+        </div>
+        <div class="principle">
+          <div class="h">Yours to keep</div>
+          <div class="d">Everything is documented and handed over. The engine belongs to your team, not to us.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONTACT -->
+  <section id="contact">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker">Get in touch</div>
+        <h2>Let us map out your outbound engine</h2>
+        <p>Tell us where you are today and what you sell. We will reply within one business day with a clear, honest view of whether outbound is the right next move and how we would build it.</p>
+      </div>
+      <div class="contact-grid">
+        <div class="contact-card">
+          <h3>Contact details</h3>
+          <p>The fastest way to reach us is email. Send a short note about your company and your current sales setup, and we will take it from there.</p>
+          <div class="contact-line">
+            <span class="ci" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
+            <span class="ct">
+              <span class="l">Email</span>
+              <a class="v" href="mailto:hello@outreachopszone.co">hello@outreachopszone.co</a>
+            </span>
+          </div>
+          <div class="contact-line">
+            <span class="ci" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+            <span class="ct">
+              <span class="l">Hours</span>
+              <span class="v">Monday to Friday, 9am to 6pm</span>
+            </span>
+          </div>
+          <div class="contact-line">
+            <span class="ci" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s-7-5.2-7-11a7 7 0 1 1 14 0c0 5.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span>
+            <span class="ct">
+              <span class="l">Where we work</span>
+              <span class="v">Remote first, serving teams across North America and Europe</span>
+            </span>
+          </div>
+          <a class="contact-btn" href="mailto:hello@outreachopszone.co?subject=Outbound%20inquiry">Email us about your pipeline</a>
+        </div>
+
+        <div class="contact-card">
+          <h3>What happens next</h3>
+          <p>A simple, no pressure process. Here is how a first conversation usually goes.</p>
+          <ol class="steps">
+            <li><strong>Intro call</strong> We learn your offer, your buyers, and what you have tried so far.</li>
+            <li><strong>Quick audit</strong> We review your current setup and outline a realistic plan.</li>
+            <li><strong>Build and launch</strong> If it is a fit, we install the system and go live within weeks.</li>
+            <li><strong>Run and report</strong> We operate the engine and meet weekly to refine it.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-brand">
+        <span class="mark" aria-hidden="true"></span>
+        Outreach Ops Zone
+      </div>
+      <nav class="foot-links">
+        <a href="#services">Services</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+        <a href="mailto:hello@outreachopszone.co">hello@outreachopszone.co</a>
+      </nav>
+    </div>
+    <div class="foot-bottom">
+      <span>&copy; 2026 Outreach Ops Zone. All rights reserved.</span>
+      <span>outreachopszone.co</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Mirror of .railwayignore — a direct `docker build` must never bake secrets
+# (server/data/ holds api_keys.json, gmail_tokens.json, smtp_inboxes.json, manychat_sa.json)
+# into image layers. Railway reads .railwayignore; plain docker only reads this file.
+.env
+*.env
+node_modules/
+**/node_modules/
+server/data/
+app/dist/
+output/

@@ -6,6 +6,11 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "stopping old processes…"
 lsof -ti :8790 | xargs kill -9 2>/dev/null || true
+# ALSO kill servers NOT holding the port: a watchdog respawn that lost the EADDRINUSE
+# race keeps running its send loops portless (zombie), survives the lsof kill, and can
+# squat the send-owner lock while unable to send (the Jul 6 stall). npm-spawned servers
+# have no "tedca-os" in argv, so match the script path itself.
+pgrep -f "server/src/index.js" | xargs kill -9 2>/dev/null || true
 # pkill -f can miss processes with spaces in path; also kill by scanning pgrep output
 pgrep -f "tedca-os/worker" | xargs kill -9 2>/dev/null || true
 pgrep -f "tedca-os/app.*vite" | xargs kill -9 2>/dev/null || true
@@ -20,7 +25,10 @@ echo "starting app…"
 
 echo "starting worker…"
 # Override BACKEND_URL so the local worker talks to the local server, not the cloud.
-(cd "$DIR/worker" && BACKEND_URL=http://localhost:8790 nohup node --env-file-if-exists="$DIR/../.env" --env-file="$DIR/.env" "$DIR/worker/index.js" > /tmp/tedca-worker.log 2>&1 &)
+# Record this worker's PID + start time so the watchdog ADOPTS it instead of thinking
+# the worker is down (stale pid file) and spawning a SECOND one → duplicate worker.
+(cd "$DIR/worker" && BACKEND_URL=http://localhost:8790 nohup node --env-file-if-exists="$DIR/../.env" --env-file="$DIR/.env" "$DIR/worker/index.js" > /tmp/tedca-worker.log 2>&1 & echo $! > /tmp/tedca-worker.pid)
+date +%s > /tmp/tedca-worker.started
 sleep 3
 
 # verify all three

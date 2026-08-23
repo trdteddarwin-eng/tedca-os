@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyAI Gen | AI Content & Generation Studio</title>
+<meta name="description" content="MyAI Gen is an AI content and generation studio that helps brands produce on-brand content at scale, from social and email to product copy and visuals.">
+<style>
+  :root {
+    --bg: #0e1116;
+    --bg-soft: #161b22;
+    --surface: #1b2230;
+    --ink: #e9edf4;
+    --ink-soft: #aab4c5;
+    --line: #283041;
+    --accent: #6c8cff;
+    --accent-2: #58e1c4;
+    --accent-deep: #4a6bf0;
+    --radius: 16px;
+    --max: 1120px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  .wrap { width: 100%; max-width: var(--max); margin: 0 auto; padding: 0 24px; }
+
+  /* Header */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(14, 17, 22, 0.82);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 68px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: -0.02em;
+  }
+  .logo-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    box-shadow: 0 4px 14px rgba(108, 140, 255, 0.35);
+  }
+  .logo-mark span {
+    font-weight: 800;
+    font-size: 0.95rem;
+    color: #0e1116;
+    letter-spacing: -0.04em;
+  }
+  .nav-links { display: flex; gap: 30px; align-items: center; }
+  .nav-links a {
+    color: var(--ink-soft);
+    font-size: 0.94rem;
+    font-weight: 500;
+    transition: color 0.2s ease;
+  }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-cta {
+    background: var(--accent);
+    color: #0e1116 !important;
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-weight: 600;
+    transition: background 0.2s ease, transform 0.2s ease;
+  }
+  .nav-cta:hover { background: var(--accent-deep); transform: translateY(-1px); }
+  .menu-toggle { display: none; }
+
+  /* Hero */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    padding: 96px 0 88px;
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(720px 380px at 78% 12%, rgba(108, 140, 255, 0.22), transparent 60%),
+      radial-gradient(600px 360px at 8% 88%, rgba(88, 225, 196, 0.16), transparent 60%);
+    pointer-events: none;
+  }
+  .hero .wrap { position: relative; }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-2);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    padding: 6px 14px;
+    border-radius: 999px;
+    margin-bottom: 24px;
+  }
+  .eyebrow .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent-2);
+    box-shadow: 0 0 8px var(--accent-2);
+  }
+  .hero h1 {
+    font-size: clamp(2.2rem, 5.4vw, 3.6rem);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    font-weight: 800;
+    max-width: 16ch;
+    margin-bottom: 22px;
+  }
+  .hero h1 .grad {
+    background: linear-gradient(120deg, var(--accent) 0%, var(--accent-2) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero p.sub {
+    font-size: 1.18rem;
+    color: var(--ink-soft);
+    max-width: 56ch;
+    margin-bottom: 34px;
+  }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 14px 26px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: linear-gradient(120deg, var(--accent) 0%, var(--accent-deep) 100%);
+    color: #fff;
+    box-shadow: 0 10px 26px rgba(74, 107, 240, 0.32);
+  }
+  .btn-primary:hover { transform: translateY(-2px); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .btn-ghost:hover { border-color: var(--accent); }
+  .hero-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 40px;
+    margin-top: 56px;
+    padding-top: 36px;
+    border-top: 1px solid var(--line);
+  }
+  .stat .num {
+    font-size: 1.9rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .stat .lbl { font-size: 0.9rem; color: var(--ink-soft); }
+
+  /* Sections */
+  section { padding: 84px 0; }
+  .section-head { max-width: 60ch; margin-bottom: 52px; }
+  .section-head .kicker {
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .section-head h2 {
+    font-size: clamp(1.7rem, 3.6vw, 2.5rem);
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+    margin-bottom: 16px;
+  }
+  .section-head p { color: var(--ink-soft); font-size: 1.06rem; }
+
+  /* Services */
+  #services { background: var(--bg-soft); }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 30px 28px;
+    transition: transform 0.25s ease, border-color 0.25s ease;
+  }
+  .card:hover { transform: translateY(-4px); border-color: var(--accent); }
+  .card-icon {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    display: grid; place-items: center;
+    margin-bottom: 20px;
+    background: linear-gradient(135deg, rgba(108,140,255,0.18), rgba(88,225,196,0.18));
+    border: 1px solid var(--line);
+  }
+  .card h3 { font-size: 1.22rem; letter-spacing: -0.01em; margin-bottom: 10px; }
+  .card p { color: var(--ink-soft); font-size: 0.98rem; }
+  .card ul { list-style: none; margin-top: 16px; }
+  .card li {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    padding-left: 22px;
+    position: relative;
+    margin-bottom: 7px;
+  }
+  .card li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 9px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent-2);
+  }
+
+  /* About */
+  .about-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 56px; align-items: center; }
+  .about-copy p { color: var(--ink-soft); font-size: 1.08rem; margin-bottom: 18px; }
+  .about-copy p strong { color: var(--ink); font-weight: 600; }
+  .about-panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  .about-panel::after {
+    content: "";
+    position: absolute;
+    top: -40px; right: -40px;
+    width: 180px; height: 180px;
+    background: radial-gradient(circle, rgba(108,140,255,0.25), transparent 70%);
+  }
+  .about-panel h4 { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-2); margin-bottom: 20px; }
+  .principle { display: flex; gap: 14px; margin-bottom: 20px; position: relative; }
+  .principle:last-child { margin-bottom: 0; }
+  .principle .pn {
+    flex: 0 0 auto;
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    display: grid; place-items: center;
+    font-weight: 700; font-size: 0.85rem;
+    color: var(--accent);
+  }
+  .principle h5 { font-size: 0.98rem; margin-bottom: 3px; }
+  .principle p { font-size: 0.9rem; color: var(--ink-soft); }
+
+  /* Contact */
+  #contact { background: var(--bg-soft); }
+  .contact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+  .contact-copy h2 { font-size: clamp(1.7rem, 3.6vw, 2.4rem); letter-spacing: -0.025em; margin-bottom: 16px; }
+  .contact-copy p { color: var(--ink-soft); font-size: 1.06rem; margin-bottom: 28px; }
+  .contact-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 34px;
+  }
+  .contact-row { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .contact-row:last-child { border-bottom: none; }
+  .contact-row .ci {
+    width: 40px; height: 40px; flex: 0 0 auto;
+    border-radius: 10px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    display: grid; place-items: center;
+  }
+  .contact-row .label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
+  .contact-row .value { font-size: 1rem; font-weight: 600; }
+  .contact-row a.value:hover { color: var(--accent); }
+  .contact-card .btn { width: 100%; justify-content: center; margin-top: 26px; }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 40px 0;
+  }
+  .foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+  }
+  .foot .brand { font-size: 1rem; }
+  .foot-meta { color: var(--ink-soft); font-size: 0.9rem; }
+  .foot-meta a:hover { color: var(--accent); }
+
+  svg { display: block; }
+
+  @media (max-width: 880px) {
+    .cards { grid-template-columns: 1fr; }
+    .about-grid, .contact-grid { grid-template-columns: 1fr; gap: 36px; }
+    .nav-links { display: none; }
+  }
+  @media (max-width: 560px) {
+    .hero { padding: 70px 0 64px; }
+    .hero-stats { gap: 28px; }
+    section { padding: 64px 0; }
+    .btn { width: 100%; justify-content: center; }
+    .hero-actions { flex-direction: column; align-items: stretch; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top" aria-label="MyAI Gen home">
+      <span class="logo-mark"><span>Mg</span></span>
+      MyAI Gen
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#services">What we do</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+      <a class="nav-cta" href="#contact">Start a project</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow"><span class="dot"></span> AI Content &amp; Generation Studio</span>
+      <h1>On-brand content, <span class="grad">produced at the speed your brand actually moves.</span></h1>
+      <p class="sub">MyAI Gen pairs trained generative models with human editors so your team can ship social posts, campaigns, product copy, and visuals that sound like you, not like a template. We build the system once, then keep the output flowing.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#contact">Book a working session
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn-ghost" href="#services">See how it works</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><div class="num">8x</div><div class="lbl">Faster content turnaround</div></div>
+        <div class="stat"><div class="num">40+</div><div class="lbl">Brand voices trained &amp; maintained</div></div>
+        <div class="stat"><div class="num">100%</div><div class="lbl">Human-reviewed before delivery</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SERVICES -->
+  <section id="services">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="kicker">What we do</div>
+        <h2>Three ways we help brands generate more, without sounding generic.</h2>
+        <p>Every engagement starts with a voice profile built from your real material. From there, generation becomes repeatable instead of risky.</p>
+      </div>
+      <div class="cards">
+
+        <div class="card">
+          <div class="card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18.5 9l-3.6 3.1.9 4.9L12 14.8 8.2 17l.9-4.9L5.5 9l4.6-1.4z"/></svg>
+          </div>
+          <h3>Brand Voice Engines</h3>
+          <p>We train a private generation model on your tone, terminology, and guidelines, so every draft starts already sounding like your brand.</p>
+          <ul>
+            <li>Voice profiling from existing assets</li>
+            <li>Style and compliance guardrails</li>
+            <li>Reusable prompt libraries for your team</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#58e1c4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/></svg>
+          </div>
+          <h3>Content at Scale</h3>
+          <p>Social calendars, email sequences, landing copy, and product descriptions generated in batches, then edited by people before anything ships.</p>
+          <ul>
+            <li>Multi-channel content batches</li>
+            <li>Variant testing for headlines and hooks</li>
+            <li>Editorial review on every deliverable</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 15l5-4 4 3 4-5 5 5"/><circle cx="9" cy="8" r="1.6"/></svg>
+          </div>
+          <h3>Visuals &amp; Creative</h3>
+          <p>On-brand imagery, thumbnails, and ad concepts generated to your palette and layout rules, ready for designers to refine and approve.</p>
+          <ul>
+            <li>Concept generation in your visual system</li>
+            <li>Ad and thumbnail variations on demand</li>
+            <li>Handoff-ready files for your design team</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ABOUT -->
+  <section id="about">
+    <div class="wrap about-grid">
+      <div class="about-copy">
+        <div class="kicker" style="font-size:0.82rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:14px;">About MyAI Gen</div>
+        <h2 style="font-size:clamp(1.7rem,3.6vw,2.5rem);letter-spacing:-0.025em;line-height:1.15;margin-bottom:20px;">A studio built for brands that need more output and refuse to lose their voice.</h2>
+        <p>MyAI Gen started with a simple frustration. Generative tools made it easy to produce a lot of content fast, and easy to produce a lot of content that sounded like everyone else. We thought the answer was not more tools, but a studio that combines tuned models with editors who actually care how a sentence lands.</p>
+        <p>Today we work with marketing teams, founders, and agencies who want a dependable content pipeline. We set up the voice engine, run the generation, and put a human between the model and your audience on every piece. <strong>The result is volume you can trust and a brand that still sounds like itself.</strong></p>
+      </div>
+      <div class="about-panel">
+        <h4>How we work</h4>
+        <div class="principle">
+          <div class="pn">1</div>
+          <div><h5>Learn the voice first</h5><p>We study your real content before we generate a single line.</p></div>
+        </div>
+        <div class="principle">
+          <div class="pn">2</div>
+          <div><h5>Generate in systems</h5><p>Repeatable workflows, not one-off prompts, so quality holds at volume.</p></div>
+        </div>
+        <div class="principle">
+          <div class="pn">3</div>
+          <div><h5>Edit before delivery</h5><p>Nothing reaches your audience without a human review and sign-off.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONTACT -->
+  <section id="contact">
+    <div class="wrap contact-grid">
+      <div class="contact-copy">
+        <div class="kicker" style="font-size:0.82rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:14px;">Contact</div>
+        <h2>Tell us what you need to produce.</h2>
+        <p>Share your brand, your channels, and the kind of volume you are trying to reach. We will reply with a clear plan and a sample built in your voice, usually within two business days.</p>
+        <a class="btn btn-primary" href="mailto:hello@mymyaigen.co?subject=Project%20inquiry%20for%20MyAI%20Gen">Email the studio
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+      </div>
+      <div class="contact-card">
+        <div class="contact-row">
+          <div class="ci">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          </div>
+          <div>
+            <div class="label">Email</div>
+            <a class="value" href="mailto:hello@mymyaigen.co">hello@mymyaigen.co</a>
+          </div>
+        </div>
+        <div class="contact-row">
+          <div class="ci">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#58e1c4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </div>
+          <div>
+            <div class="label">Hours</div>
+            <div class="value">Mon to Fri, 9am to 6pm</div>
+          </div>
+        </div>
+        <div class="contact-row">
+          <div class="ci">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/></svg>
+          </div>
+          <div>
+            <div class="label">Web</div>
+            <div class="value">mymyaigen.co</div>
+          </div>
+        </div>
+        <a class="btn btn-ghost" href="mailto:hello@mymyaigen.co?subject=Request%20a%20sample">Request a sample in your voice</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="#top">
+      <span class="logo-mark"><span>Mg</span></span>
+      MyAI Gen
+    </a>
+    <div class="foot-meta">
+      <a href="mailto:hello@mymyaigen.co">hello@mymyaigen.co</a>
+      &nbsp;&middot;&nbsp; mymyaigen.co
+    </div>
+    <div class="foot-meta">&copy; 2026 MyAI Gen. All rights reserved.</div>
+  </div>
+</footer>
+
+</body>
+</html>

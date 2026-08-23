@@ -26,3 +26,14 @@ obsidian-crm-structure.html
 !**/package.json
 
 system-overview.html
+
+email-preview.html
+
+# HeyGen pipeline artifacts (225MB of rendered video/probe dumps — regeneratable)
+heygen/out/
+heygen/_runs/
+heygen/_probe/
+
+# stray local db file (real db lives in server/data/, ignored above)
+server/tedca.db
+*.bak
