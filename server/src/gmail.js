@@ -225,7 +225,7 @@ function b64url(s) {
   return Buffer.from(s).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-export async function sendEmail({ from, to, subject, body, inReplyTo = null }) {
+export async function sendEmail({ from, to, subject, body, inReplyTo = null, attachments = [] }) {
   const accessToken = await refreshAccessToken(from);
   subject = String(subject || "").replace(/[\r\n]+/g, " "); // guard against header injection
   // RFC 2047 encode the subject so non-ASCII (em-dashes, accents) survives transit
@@ -237,13 +237,42 @@ export async function sendEmail({ from, to, subject, body, inReplyTo = null }) {
     `To: ${to}`,
     `Subject: ${encSubject}`,
     "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
     `List-Unsubscribe: <mailto:${from}?subject=unsubscribe>`,
   ];
   if (inReplyTo) {
     headers.push(`In-Reply-To: ${inReplyTo}`, `References: ${inReplyTo}`);
   }
-  const raw = b64url(headers.join("\r\n") + "\r\n\r\n" + body);
+  let mime;
+  if (attachments.length) {
+    // multipart/mixed: text part + one base64 part per file (Hot Leads replies)
+    const fs = await import("node:fs");
+    const boundary = "tedca_" + Math.random().toString(36).slice(2);
+    headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+    const parts = [
+      `--${boundary}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      "",
+      body,
+    ];
+    for (const a of attachments) {
+      const data = fs.readFileSync(a.path).toString("base64").replace(/(.{76})/g, "$1\r\n");
+      const safeName = String(a.filename || "attachment").replace(/["\r\n]/g, "");
+      parts.push(
+        `--${boundary}`,
+        `Content-Type: ${a.contentType || "application/octet-stream"}; name="${safeName}"`,
+        "Content-Transfer-Encoding: base64",
+        `Content-Disposition: attachment; filename="${safeName}"`,
+        "",
+        data
+      );
+    }
+    parts.push(`--${boundary}--`);
+    mime = headers.join("\r\n") + "\r\n\r\n" + parts.join("\r\n");
+  } else {
+    headers.push('Content-Type: text/plain; charset="UTF-8"');
+    mime = headers.join("\r\n") + "\r\n\r\n" + body;
+  }
+  const raw = b64url(mime);
   const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },

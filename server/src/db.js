@@ -138,6 +138,79 @@ try {
   /* already exists */
 }
 
+// Clip Editor with history: every video-edit belongs to a project; each revision is a new
+// version built FROM a previous version's composition state (branching via parent_version_id).
+db.exec(`
+CREATE TABLE IF NOT EXISTS edit_projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  style_id TEXT NOT NULL DEFAULT 'locked',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS edit_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  version_n INTEGER NOT NULL,
+  parent_version_id INTEGER,           -- which version this was revised FROM (branching)
+  job_id INTEGER,                      -- jobs table stays the execution source of truth
+  status TEXT NOT NULL DEFAULT 'rendering',  -- rendering|done|failed|seeded
+  notes TEXT,
+  output_path TEXT,
+  build_log_path TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_edit_versions_project ON edit_versions(project_id, version_n);
+`);
+
+// Market rotation: the engine scrapes ONE metro at a time and auto-advances to the
+// next fresh one when a market stops yielding new businesses. Exhausted markets are
+// never scraped again — that is the Apify cost guard (no paying to re-scrape a city
+// we have already drained).
+db.exec(`
+CREATE TABLE IF NOT EXISTS markets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  query TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'fresh',   -- fresh | active | exhausted
+  runs_used INTEGER NOT NULL DEFAULT 0,
+  last_run_at TEXT,
+  last_new_count INTEGER
+);
+`);
+
+// Content Posted: every IG reel / FB video we track + a metrics snapshot per
+// refresh (content.js polls the Graph APIs — Meta has no push webhook for
+// like/view counts). The snapshot HISTORY is the point: it lets the UI draw a
+// per-post growth curve, so "real time" degrades gracefully into "here is how
+// this post grew".
+db.exec(`
+CREATE TABLE IF NOT EXISTS content_posts (
+  id TEXT PRIMARY KEY,                 -- "<network>:<external_id>"
+  network TEXT NOT NULL,               -- instagram | facebook
+  external_id TEXT NOT NULL,
+  permalink TEXT,
+  caption TEXT,
+  media_type TEXT,                     -- REELS | FEED | IMAGE | CAROUSEL_ALBUM | VIDEO
+  thumbnail_url TEXT,
+  posted_at TEXT,
+  first_seen TEXT,
+  last_refreshed TEXT
+);
+CREATE TABLE IF NOT EXISTS content_metrics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id TEXT NOT NULL,
+  captured_at TEXT NOT NULL,
+  views INTEGER,
+  reach INTEGER,
+  likes INTEGER,
+  comments INTEGER,
+  saves INTEGER,
+  shares INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_content_metrics_post ON content_metrics(post_id, captured_at);
+`);
+
 const defaults = {
   niche: "med spa",
   city: "Bergen County NJ",

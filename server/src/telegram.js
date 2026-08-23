@@ -4,7 +4,7 @@ export function telegramConfigured() {
 }
 
 // Send a file (audio/photo/video/document) to the user's phone via the bot.
-export async function sendTelegramFile(buffer, filename, caption = "", kind = "document") {
+export async function sendTelegramFile(buffer, filename, caption = "", kind = "document", dims = null) {
   const token = process.env.TELEGRAM_BOT_TOKEN || "";
   const chatId = process.env.TELEGRAM_CHAT_ID || "";
   if (!token || !chatId) return false;
@@ -13,6 +13,14 @@ export async function sendTelegramFile(buffer, filename, caption = "", kind = "d
   const form = new FormData();
   form.append("chat_id", chatId);
   if (caption) form.append("caption", caption.slice(0, 1000));
+  // Without explicit dimensions Telegram guesses the aspect ratio and crops tall
+  // (9:16) videos into a weird square preview. Passing width/height + streaming
+  // makes vertical reels render correctly in the chat bubble.
+  if (kind === "video" && dims && dims.width && dims.height) {
+    form.append("width", String(dims.width));
+    form.append("height", String(dims.height));
+    form.append("supports_streaming", "true");
+  }
   form.append(field, new Blob([buffer]), filename);
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {

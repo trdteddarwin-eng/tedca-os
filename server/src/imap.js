@@ -23,6 +23,12 @@ export async function listImapReplies(email, sinceDays = 3) {
     greetingTimeout: 10000,
     socketTimeout: 60000,
   });
+  // imapflow emits an async 'error' event (separate from connect()/operation
+  // rejections) when a socket drops or auth fails. With NO listener, Node treats it
+  // as an uncaught exception and CRASHES the whole server mid-run. Swallow it here —
+  // the awaited calls below already reject and are handled by the caller, which logs
+  // the failure and moves on to the next inbox.
+  client.on("error", () => {});
 
   const out = [];
   await client.connect();

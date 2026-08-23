@@ -18,7 +18,15 @@ export function isSmtp(email) {
 }
 
 // route a send to the right transport; same shape as gmail.js sendEmail()
-export async function sendVia({ from, to, subject, body, inReplyTo = null }) {
-  if (isSmtpInbox(from)) return sendEmailSMTP({ from, to, subject, body, inReplyTo });
-  return sendEmail({ from, to, subject, body, inReplyTo });
+export async function sendVia({ from, to, subject, body, inReplyTo = null, attachments = [] }) {
+  // Hard kill-switch. When SEND_DISABLED=1 (set ONLY on the dormant cloud instance during
+  // bring-up) no email can leave this process regardless of DB test_mode/schedule settings —
+  // the backstop against double-sending real prospects while the Mac is still the live sender.
+  // Removed (with the Mac paused) at the Phase-2 cutover. The Mac never sets it, so this is a
+  // no-op there and Mac behavior is unchanged.
+  if (process.env.SEND_DISABLED === "1") {
+    throw new Error("SEND_DISABLED: outbound sending is turned off on this instance");
+  }
+  if (isSmtpInbox(from)) return sendEmailSMTP({ from, to, subject, body, inReplyTo, attachments });
+  return sendEmail({ from, to, subject, body, inReplyTo, attachments });
 }

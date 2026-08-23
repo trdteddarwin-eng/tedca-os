@@ -30,7 +30,7 @@ export const SITES = {
     posthogProjectId: "561531",
     posthogHost: "https://us.posthog.com",
     leadsEndpoint:
-      "https://script.google.com/macros/s/AKfycbx1hf5x_pNqmKu9ApUEJl-ZVdBpvFBKyt94-Ojlo5LBCiaDjzzlkURYF1nQpIwDMc20/exec",
+      "https://script.google.com/macros/s/AKfycbzpw3gTn5ULOwzyYKbQeP5pI-dvfUfGe-n8DD0wkKFZwvEWG9qsGOb5m-SjnsYxELTr/exec",
     // Local only. Railway has no copy of the rank-and-rent repo, so this is
     // expected to be missing in the cloud and the section just reports so.
     gscHistoryCsv: path.join(
@@ -42,6 +42,12 @@ export const SITES = {
 // The site sells to New Jersey, and Ted reads this over morning coffee in the
 // same timezone. Bucketing by UTC would roll the day over at 8pm and make
 // "today" wrong for the whole evening.
+// Must stay byte-identical to ANON_QUERY in rank-and-rent/tracking/gsc_report.py.
+// It labels the impressions/clicks Search Console reports in a day's total but
+// withholds from the query dimension. Summed into daily totals, excluded from
+// top queries.
+const ANON_QUERY = "(anonymized long-tail)";
+
 const TZ = "America/New_York";
 
 function dayKey(d) {
@@ -121,6 +127,40 @@ async function fetchTraffic(site) {
 
 // ------------------------------------------------------------------ leads ---
 
+// A lead row is synthetic if it is one of our own end-to-end tests or an
+// obvious spam bot. On 2026-08-21 the panel reported "1 lead yesterday, 4 this
+// week" when the real count was ZERO: seven rows were diagnostics and one was a
+// bot. Inflated lead counts are worse than none here, because lead volume is
+// the entire pitch to a prospective renter.
+//
+// Filtering happens on read rather than by deleting rows, so the sheet keeps its
+// audit trail and future test rows are handled automatically.
+const TEST_PHONE_SUFFIXES = ["0000", "0123", "0322", "0888", "0999", "1234"];
+const TEST_NAME_TOKENS = ["TEST", "DIAGNOSTIC", "DBG", "SAFE TO DELETE"];
+// Real submissions carry one of these tags, written by the site's own forms.
+const REAL_LEAD_TAGS = ["HERO BAR", "QUOTE UNLOCKED", "HOT LEAD", "BOOKED MEASURE"];
+
+function isSyntheticLead(r) {
+  const blob = `${r.name} ${r.message} ${r.town} ${r.service}`.toUpperCase();
+  if (TEST_NAME_TOKENS.some((t) => blob.includes(t))) return true;
+
+  const digits = String(r.phone || "").replace(/\D/g, "");
+  if (digits && TEST_PHONE_SUFFIXES.includes(digits.slice(-4))) return true;
+
+  // Spam bots: an unusable phone number and none of the form's own tags. A real
+  // US number is 10 digits, or 11 starting with the country code 1. The bot that
+  // got through on 2026-08-20 used `89468759124` - 11 digits, so a bare length
+  // check passed it, but no US number starts with 8 at that length.
+  const tagged = REAL_LEAD_TAGS.some((t) => String(r.message || "").toUpperCase().includes(t));
+  if (!tagged && digits) {
+    const usable =
+      digits.length === 10 || (digits.length === 11 && digits.startsWith("1"));
+    if (!usable) return true;
+  }
+
+  return false;
+}
+
 async function fetchLeads(site) {
   const res = await fetch(`${site.leadsEndpoint}?type=leads&n=200`, {
     redirect: "follow",
@@ -149,17 +189,23 @@ async function fetchLeads(site) {
     };
   });
 
-  const countOn = (k) => rows.filter((r) => r.day === k && !r.blank).length;
+  // Everything below counts REAL leads only. `syntheticRows` is surfaced so the
+  // number stays visible rather than quietly vanishing.
+  const real = rows.filter((r) => !r.blank && !isSyntheticLead(r));
+  const synthetic = rows.filter((r) => !r.blank && isSyntheticLead(r));
+
+  const countOn = (k) => real.filter((r) => r.day === k).length;
   const last7 = new Set(Array.from({ length: 7 }, (_, i) => dayOffset(-i)));
 
   return {
     ok: true,
     today: countOn(dayOffset(0)),
     yesterday: countOn(dayOffset(-1)),
-    last7: rows.filter((r) => r.day && last7.has(r.day) && !r.blank).length,
-    total: rows.filter((r) => !r.blank).length,
+    last7: real.filter((r) => r.day && last7.has(r.day)).length,
+    total: real.length,
     blankRows: rows.filter((r) => r.blank).length,
-    recent: rows.filter((r) => !r.blank).slice(0, 12),
+    syntheticRows: synthetic.length,
+    recent: real.slice(0, 12),
   };
 }
 
@@ -195,23 +241,32 @@ function readSearch(site) {
     const query = parts.slice(2, parts.length - 4).join(",");
 
     if (date > latest) latest = date;
+    // Position is weighted by impressions. A flat mean lets a query with one
+    // impression at position 3 outweigh one with 50 impressions at position 60.
     const d = byDay.get(date) || { day: date, impressions: 0, clicks: 0, posSum: 0, n: 0 };
-    d.impressions += impressions; d.clicks += clicks; d.posSum += position; d.n += 1;
+    d.impressions += impressions; d.clicks += clicks;
+    d.posSum += position * impressions; d.n += impressions;
     byDay.set(date, d);
 
+    // ANON_QUERY is the remainder Search Console withholds from the query
+    // dimension. It belongs in the daily totals above but is not a query, so it
+    // must never appear in a "top queries" list.
+    if (query === ANON_QUERY) continue;
+
     const q = queries.get(query) || { query, impressions: 0, clicks: 0, posSum: 0, n: 0, lastSeen: date };
-    q.impressions += impressions; q.clicks += clicks; q.posSum += position; q.n += 1;
+    q.impressions += impressions; q.clicks += clicks;
+    q.posSum += position * impressions; q.n += impressions;
     if (date > q.lastSeen) q.lastSeen = date;
     queries.set(query, q);
   }
 
   const days = [...byDay.values()]
-    .map((d) => ({ day: d.day, impressions: d.impressions, clicks: d.clicks, position: +(d.posSum / d.n).toFixed(1) }))
+    .map((d) => ({ day: d.day, impressions: d.impressions, clicks: d.clicks, position: d.n ? +(d.posSum / d.n).toFixed(1) : 0 }))
     .sort((a, b) => (a.day < b.day ? 1 : -1));
 
   const top = [...queries.values()]
     .filter((q) => q.lastSeen === latest)
-    .map((q) => ({ query: q.query, impressions: q.impressions, clicks: q.clicks, position: +(q.posSum / q.n).toFixed(1) }))
+    .map((q) => ({ query: q.query, impressions: q.impressions, clicks: q.clicks, position: q.n ? +(q.posSum / q.n).toFixed(1) : 0 }))
     .sort((a, b) => b.impressions - a.impressions)
     .slice(0, 15);
 

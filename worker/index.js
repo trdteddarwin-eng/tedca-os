@@ -66,6 +66,19 @@ async function sendTelegramFile(filePath, caption = "", kind = "document") {
   form.append("chat_id", chatId);
   if (caption) form.append("caption", caption.slice(0, 1000));
   form.append(field, new Blob([fs.readFileSync(filePath)]), path.basename(filePath));
+  if (kind === "video") {
+    // pass real dimensions so Telegram renders tall (9:16) videos without the weird crop
+    try {
+      const { execFileSync } = await import("node:child_process");
+      const probe = execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", filePath], { encoding: "utf8" }).trim();
+      const [w, h] = probe.split(",").map(Number);
+      if (w > 0 && h > 0) {
+        form.append("width", String(w));
+        form.append("height", String(h));
+        form.append("supports_streaming", "true");
+      }
+    } catch { /* no ffprobe → Telegram guesses, same as before */ }
+  }
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", body: form });
     if (!res.ok) {
@@ -131,7 +144,7 @@ function runPython(script, args, timeoutMs = 9 * 60 * 1000) {
 // .env / secret reads even in bypass mode).
 const CLAUDE_BIN = process.env.CLAUDE_BIN || path.join(os.homedir(), ".local", "bin", "claude");
 
-function runClaudeAgent(prompt, timeoutMs) {
+function runClaudeAgent(prompt, timeoutMs, extraArgs = []) {
   return new Promise((resolve, reject) => {
     // Headless claude must use Ted's OAuth login (~/.claude), NOT an ANTHROPIC_API_KEY that
     // may have leaked into the worker's env (e.g. inherited from the launching shell) — an
@@ -140,7 +153,7 @@ function runClaudeAgent(prompt, timeoutMs) {
     const env = { ...process.env };
     delete env.ANTHROPIC_API_KEY;
     delete env.ANTHROPIC_AUTH_TOKEN;
-    const child = spawn(CLAUDE_BIN, ["-p", prompt, "--permission-mode", "bypassPermissions"], {
+    const child = spawn(CLAUDE_BIN, ["-p", prompt, "--permission-mode", "bypassPermissions", ...extraArgs], {
       cwd: WORKSPACE,
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -207,7 +220,7 @@ async function handleMotionGraphic(job) {
     ``,
     `TOPIC: ${topic}`,
     ``,
-    `Your COMPLETE instruction set is Ted's motion-graphic playbook — read it IN FULL and follow it exactly. It documents his exact method and points to the reusable render engine + assets you MUST reuse:`,
+    `Your COMPLETE instruction set is Ted's motion-graphic playbook — read it IN FULL and follow it exactly. It documents his exact method and points to the reusable render ENGINE (render pipeline, fonts, real SFX library) you MUST reuse. Scene compositions are NOT reusable assets: design every scene's visuals fresh for THIS topic — never copy scene markup/SVG from a previous video's composition:`,
     path.join(WORKSPACE, "signature-motion-graphic", "PLAYBOOK.md"),
     ``,
     `Per the playbook: write a human-toned script (not AI-sounding), generate narration with the locked voice, design the kinetic mixed-weight type + UI-card scenes, add SFX anchored to every visible change, and render DETERMINISTICALLY (HTML/CSS/JS + window.__seek(ms) + headless-Chrome/Playwright frame capture + ffmpeg — NEVER MediaRecorder). Reuse the render.mjs / insiderforce-recreate pipeline the playbook points to instead of writing a renderer from scratch. Run the playbook's self-critique loop to its target score (>=95).`,
@@ -215,9 +228,11 @@ async function handleMotionGraphic(job) {
     `When finished, the single deliverable MP4 MUST be saved to EXACTLY this absolute path (overwrite if present):`,
     outPath,
     ``,
-    `Work fully autonomously — do NOT ask any questions, do NOT wait for approval. Reuse existing scripts/assets rather than rebuilding from scratch. When the file exists at that exact path, you are done.`,
+    `Work fully autonomously — do NOT ask any questions, do NOT wait for approval. Reuse existing PIPELINE scripts (renderer, VO generation, SFX library) rather than rebuilding them — but design all visuals fresh for this topic. When the file exists at that exact path, you are done.`,
   ].join("\n");
-  const stdout = await runClaudeAgent(prompt, 30 * 60 * 1000);
+  // 90m, not 30m: a full motion-graphic build (script -> VO -> SFX -> render) routinely
+  // exceeds 30 minutes -- job #32 died at the 30m wall on 2026-07-04. Same fix as video_edit.
+  const stdout = await runClaudeAgent(prompt, 90 * 60 * 1000);
   if (!fs.existsSync(outPath)) {
     throw new Error(`agent finished but no MP4 at ${outPath}. Agent said: ${stdout.slice(-400)}`);
   }
@@ -227,13 +242,93 @@ async function handleMotionGraphic(job) {
   return { path: outPath, topic };
 }
 
+// Drive HeyGen's web UI on this Mac. Deliberately NOT a cloud job: it needs a real browser
+// holding the logged-in HeyGen session, which is what makes the render spend subscription
+// credits instead of the metered API. tedca-os/heygen/README.md has the whole rationale.
+async function handleHeygenVideo(job) {
+  const { topic, script, audio_file, aspect } = job.params;
+  const fs = await import("node:fs");
+  const heygenDir = path.join(WORKSPACE, "tedca-os", "heygen");
+  const tmpDir = path.join(heygenDir, "out");
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  const stamp = Date.now();
+  const scriptFile = path.join(tmpDir, `job${job.id}_${stamp}_script.txt`);
+  fs.writeFileSync(scriptFile, script);
+
+  // Reuse the take the user already approved. The mp3 may live on the cloud server, so pull
+  // it over the worker channel rather than regenerating it and burning ElevenLabs credits.
+  let audioFile = null;
+  if (audio_file) {
+    const local = path.join(process.env.DATA_DIR || path.join(WORKSPACE, "tedca-os", "data"), "output", audio_file);
+    if (fs.existsSync(local)) {
+      audioFile = local;
+    } else {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/worker/output/${encodeURIComponent(audio_file)}`, {
+          headers: { Authorization: `Bearer ${WORKER_TOKEN}` },
+        });
+        if (res.ok) {
+          audioFile = path.join(tmpDir, `job${job.id}_${stamp}_vo.mp3`);
+          fs.writeFileSync(audioFile, Buffer.from(await res.arrayBuffer()));
+        }
+      } catch {
+        /* fall through — the pipeline will generate its own VO */
+      }
+    }
+  }
+
+  await sendTelegramText(
+    `🎬 Mac worker starting the HeyGen avatar video for "${topic}". Driving the browser (Avatar V, your ${audioFile ? "approved voice" : "voice"}) — this spends plan credits, not API. I'll send the MP4 here.`
+  );
+  await postEvent({
+    run_id: job.run_id,
+    actor: "research",
+    level: "info",
+    message: `Mac worker: driving HeyGen for "${topic}"${audioFile ? " with the approved VO" : ""}…`,
+  });
+
+  const args = [path.join(heygenDir, "run_pipeline.mjs"), "--topic", topic || "avatar video", "--script", scriptFile, "--aspect", aspect || "9:16"];
+  if (audioFile) args.push("--audio", audioFile);
+
+  // run_pipeline handles: HeyGen render -> API fetch of mp4 + thumbnail -> Telegram (with the
+  // re-encode that keeps it under Telegram's 50 MB cap).
+  const { execFile: _execFile } = await import("node:child_process");
+  const stdout = await new Promise((resolve, reject) => {
+    const p = _execFile(
+      process.execPath,
+      args,
+      { cwd: heygenDir, maxBuffer: 20 * 1024 * 1024, timeout: 60 * 60 * 1000 },
+      (err, out, errOut) => (err ? reject(new Error(`${err.message}\n${String(errOut).slice(-600)}`)) : resolve(out))
+    );
+    p.stdout?.on("data", (d) => process.stdout.write(d));
+  });
+
+  const m = String(stdout).match(/video:\s*(\S+\.mp4)/);
+  const outPath = m ? m[1] : null;
+  if (!outPath || !fs.existsSync(outPath)) {
+    throw new Error(`HeyGen pipeline finished but no MP4 found. Tail: ${String(stdout).slice(-400)}`);
+  }
+  await postEvent({ run_id: job.run_id, actor: "research", level: "success", message: `HeyGen avatar video ready: ${outPath}` });
+  execFile("open", ["-R", outPath], () => {});
+  return { path: outPath, topic };
+}
+
 async function handleVideoEdit(job) {
-  const { video_path, playbook, style_name, notes, prev_path, learn } = job.params;
+  const { video_path, playbook, style_name, notes, prev_path, learn, project, model, effort } = job.params;
   const fs = await import("node:fs");
   if (!fs.existsSync(video_path)) throw new Error(`uploaded video not found: ${video_path}`);
-  const outDir = path.join(WORKSPACE, "tedca-os", "output", `edit_${Date.now()}`);
+  // Clip Editor project context: per-project incremental state + per-version output/BUILD_LOG.
+  // Legacy (no project): the original one-shot edit_<ts>/edited.mp4 behavior, unchanged.
+  const proj = project || null;
+  const outDir = proj
+    ? path.join(WORKSPACE, proj.project_dir, `v${proj.version_n}`)
+    : path.join(WORKSPACE, "tedca-os", "output", `edit_${Date.now()}`);
   fs.mkdirSync(outDir, { recursive: true });
-  const outPath = path.join(outDir, "edited.mp4");
+  const outPath = proj ? path.join(WORKSPACE, proj.out_path) : path.join(outDir, "edited.mp4");
+  const buildLogPath = proj ? path.join(WORKSPACE, proj.build_log_path) : "";
+  const stateDir = proj ? path.join(WORKSPACE, proj.state_dir) : "";
+  if (proj) fs.mkdirSync(stateDir, { recursive: true });
   const learningsPath = path.join(WORKSPACE, path.dirname(playbook), "LEARNINGS.md");
   await sendTelegramText(
     notes
@@ -250,27 +345,56 @@ async function handleVideoEdit(job) {
         notes,
       ]
     : [];
+  // Clip Editor: incremental project state + per-version transcript (the GOALS/BUILD_LOG model)
+  const projectBlock = proj
+    ? [
+        ``,
+        `PROJECT WORKING STATE (this edit belongs to a versioned project — work INCREMENTALLY, never from scratch when state exists):`,
+        `- Shared state dir (compositions, extracted raw frames, mattes, assets — reuse across versions of THIS project only; other projects' state/compositions are style reference, never a source to copy scenes from): ${stateDir}`,
+        ...(proj.parent_composition
+          ? [
+              `- START FROM the parent version's composition snapshot (v${proj.parent_version_n}): ${path.join(WORKSPACE, proj.parent_composition)}`,
+              `  Apply ONLY the requested changes to it; raw frames/mattes in the state dir are already cut — reuse them.`,
+            ]
+          : [
+              `- This is v${proj.version_n} (first edit): extract frames/mattes INTO the state dir so later revisions are incremental.`,
+            ]),
+        `- When finished you MUST also save your final composition as: ${path.join(stateDir, `composition_v${proj.version_n}.html`)}`,
+        `- You MUST write a timestamped BUILD_LOG of every step (files touched, commands, why — honest, including wrong turns) to: ${buildLogPath}`,
+        `- Prior version outputs in this project are IMMUTABLE (read-only) — never overwrite any v*/output.mp4 except your own target below.`,
+      ]
+    : [];
   const prompt = [
     `You are running headless as a Tedca video editor. Edit the user's already-recorded video into a finished, polished reel that matches a style playbook AND the user's accumulated preferences.`,
     ``,
-    `STYLE PLAYBOOK (read IN FULL, follow exactly — your complete instruction set; it points to the scripts/assets/SFX you must reuse):`,
+    `STYLE PLAYBOOK (read IN FULL, follow exactly — your complete instruction set; reuse its render pipeline, SFX library, and locked STYLE system, but INVENT every scene's graphics fresh for THIS video's transcript per its anti-template rule (§2b) — NEVER copy scene markup/SVG from another project's composition):`,
     path.join(WORKSPACE, playbook),
     ``,
     `LEARNINGS — the user's accumulated corrections/preferences from past edits. READ THIS FILE and OBEY it: never repeat anything listed as a mistake, always do what's listed as preferred. (If the file is missing or empty, ignore it.)`,
     learningsPath,
     ``,
+    `THE METHOD — the working loop distilled from the client's favorite editor run (recon → do-not-repeat catalog → invention list before code → mental pre-flight debug → hunt-don't-confirm screenshot audit incl. mid-motion frames → fix-and-reshoot proof → live playback smoke test → written honest gaps). READ IT and RUN IT, whatever model you are. (If the file is missing, ignore it.)`,
+    path.join(WORKSPACE, path.dirname(playbook), "FABLE_METHOD.md"),
+    ``,
     `THE USER'S RAW VIDEO TO EDIT (the talking-head take the playbook refers to — do NOT regenerate it, edit THIS exact file):`,
     video_path,
     ...reviseBlock,
+    ...projectBlock,
     ``,
-    `Apply the full playbook treatment (Signature style = text-behind intro → riser drop → kinetic motion-graphic body → comment-keyword CTA, grade-matched splices, SFX anchored to visible changes, loudnorm). Use the deterministic render pipelines the playbook points to, and run its self-critique loop to the target score.`,
+    `Apply the full treatment the playbook defines for THIS style — its opener formula, beat grammar, caption rules, sound language, and audit gates. Map the beats from THIS video's transcript and design every scene fresh for what its words say (the playbook's anti-template rule). Use the deterministic render pipelines the playbook points to, and run its self-critique loop to the target score.`,
     ``,
     `When finished, the single finished MP4 MUST be saved to EXACTLY this absolute path (overwrite if present):`,
     outPath,
     ``,
     `Work fully autonomously — do NOT ask any questions, do NOT wait for approval. When the finished video exists at that exact path, you are done.`,
   ].join("\n");
-  const stdout = await runClaudeAgent(prompt, 45 * 60 * 1000);
+  // 90 min: a full Signature edit (MG cutaways + captions + SFX + render + self-critique)
+  // legitimately outruns 45 — job #27 (2026-07-01) was SIGKILLed mid-edit with zero output.
+  const agentArgs = [
+    ...(model ? ["--model", model] : []),
+    ...(effort ? ["--effort", effort] : []),
+  ];
+  const stdout = await runClaudeAgent(prompt, 90 * 60 * 1000, agentArgs);
   if (!fs.existsSync(outPath)) {
     throw new Error(`editor agent finished but no MP4 at ${outPath}. Agent said: ${stdout.slice(-400)}`);
   }
@@ -280,17 +404,25 @@ async function handleVideoEdit(job) {
     try {
       fs.mkdirSync(path.dirname(learningsPath), { recursive: true });
       if (!fs.existsSync(learningsPath)) {
-        fs.writeFileSync(learningsPath, "# Editor Learnings\n\nThe video editor reads this file on every run and obeys it. One correction per line.\n\n");
+        fs.writeFileSync(learningsPath, "# Editor Learnings\n\nThe video editor reads this file on every run. Apply each entry's underlying STYLE PREFERENCE to new edits; mechanics naming specific versions/files (splices, stream-copies, 'keep v2 frames') are scoped to the project noted and never transfer to a fresh video.\n\n");
       }
-      fs.appendFileSync(learningsPath, `- ${String(notes).trim()}\n`);
+      // Scope the note to its project so one-off revision mechanics never become standing
+      // orders for fresh videos (a raw "picture is LOCKED, do not re-render" note once did).
+      const scope = proj ? `project ${proj.project_id} v${proj.version_n}` : "one-shot edit";
+      fs.appendFileSync(learningsPath, `- (from ${scope} — apply the underlying style preference; version-specific mechanics stay scoped to that project) ${String(notes).trim()}\n`);
     } catch (e) {
       console.warn(`[learnings] could not append: ${e.message}`);
     }
   }
   await postEvent({ run_id: job.run_id, actor: "research", level: "success", message: `Edited video ready: ${outPath}` });
   notifyMac("Tedca OS — Clip Editor ✓", notes ? "new version ready" : "first cut ready");
-  await sendTelegramFile(outPath, `✂️ Edited (${style_name})${notes ? " · revised" : ""} — ready`, "video");
-  return { path: outPath, style: style_name, notes: notes || "" };
+  await sendTelegramFile(outPath, `✂️ Edited (${style_name})${notes ? " · revised" : ""}${proj ? ` — v${proj.version_n}` : ""} — ready`, "video");
+  return {
+    path: outPath,
+    style: style_name,
+    notes: notes || "",
+    ...(proj ? { build_log_path: fs.existsSync(buildLogPath) ? buildLogPath : "", project_id: proj.project_id, version_n: proj.version_n } : {}),
+  };
 }
 
 async function handleEduPost(job) {
@@ -329,13 +461,15 @@ async function handleEduPost(job) {
 }
 
 async function handleTts(job) {
-  const { text, voice, outName } = job.params;
+  const { text, voice, outName, speed } = job.params;
   const outDir = path.join(WORKSPACE, "tedca-os", "output");
   const fs = await import("node:fs");
   fs.mkdirSync(outDir, { recursive: true });
   const outPath = path.join(outDir, `${outName}.mp3`);
   await postEvent({ run_id: job.run_id, actor: "research", message: "Mac worker: generating the voiceover with ElevenLabs…", level: "info" });
-  await runPython("gen_avatar_vo.py", ["--text", text, "--voice", voice, "--output", outPath]);
+  const ttsArgs = ["--text", text, "--voice", voice, "--output", outPath];
+  if (speed !== null && speed !== undefined) ttsArgs.push("--speed", String(speed));
+  await runPython("gen_avatar_vo.py", ttsArgs);
   await postEvent({ run_id: job.run_id, actor: "research", message: `Voiceover ready: ${outPath}`, level: "success" });
   await sendTelegramFile(outPath, "🎙 Voiceover ready", "audio");
   // open the folder so the file is right there
@@ -562,6 +696,7 @@ async function pollJobs() {
       else if (job.type === "agentos_new_skill") result = await handleAgentosNewSkill(job);
       else if (job.type === "agentos_wire") result = await handleAgentosWire(job);
       else if (job.type === "motion_graphic") result = await handleMotionGraphic(job);
+      else if (job.type === "heygen_video") result = await handleHeygenVideo(job);
       else if (job.type === "video_edit") result = await handleVideoEdit(job);
       else if (job.type === "edu_post") result = await handleEduPost(job);
       else if (job.type === "agentos_post_revise") result = await handleAgentosPostRevise(job);

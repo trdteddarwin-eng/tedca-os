@@ -77,7 +77,7 @@ function transporterFor(email, rec) {
 }
 
 // Same signature as gmail.js sendEmail({ from, to, subject, body, inReplyTo }).
-export async function sendEmailSMTP({ from, to, subject, body, inReplyTo = null }) {
+export async function sendEmailSMTP({ from, to, subject, body, inReplyTo = null, attachments = [] }) {
   const rec = load()[String(from).toLowerCase()];
   if (!rec) throw new Error(`${from} is not a registered SMTP inbox`);
   const headers = {};
@@ -95,6 +95,8 @@ export async function sendEmailSMTP({ from, to, subject, body, inReplyTo = null 
     subject,
     text: body,
     headers,
+    // Hot Leads manual replies can carry files: [{ filename, path }]
+    ...(attachments.length ? { attachments: attachments.map((a) => ({ filename: a.filename, path: a.path })) } : {}),
   });
   return { id: info.messageId };
 }
@@ -106,6 +108,10 @@ const RAMP = [12, 12, 22, 22, 35, 35, 35, 50];
 export function smtpInboxCap(email) {
   const rec = load()[String(email).toLowerCase()];
   if (!rec) return 0;
+  // Pre-warmed inboxes (e.g. warmed externally on Zapmail before import) have a
+  // meaningless startedAt for ramp purposes — skip the age ramp so the flat cap
+  // applies. Brand-new inboxes (no prewarmed flag) DO get the ramp below.
+  if (rec.prewarmed) return 9999;
   const started = Date.parse(rec.startedAt || "") || Date.now();
   const days = Math.max(0, Math.floor((Date.now() - started) / 86400000));
   return RAMP[Math.min(days, RAMP.length - 1)];
