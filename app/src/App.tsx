@@ -4,6 +4,7 @@ import { getToken, login } from "./api";
 import Home from "./pages/Home";
 import Activity from "./pages/Activity";
 import Crm from "./pages/Crm";
+import Feed from "./pages/Feed";
 import HotLeads from "./pages/HotLeads";
 import Pipeline from "./pages/Pipeline";
 import Projects from "./pages/Projects";
@@ -18,6 +19,7 @@ import AgentOS from "./pages/AgentOS";
 import ClipEditor from "./pages/ClipEditor";
 import ManyChat from "./pages/ManyChat";
 import ContentPosted from "./pages/ContentPosted";
+import Upcoming from "./pages/Upcoming";
 import ApiKeys from "./pages/ApiKeys";
 import SiteStats from "./pages/SiteStats";
 import Digest from "./components/Digest";
@@ -27,6 +29,7 @@ const NAV = [
   { to: "/", label: "Home", short: "Home", icon: "home" },
   { to: "/activity", label: "Live Activity", short: "Activity", icon: "activity" },
   { to: "/jobs", label: "Jobs / History", short: "Jobs", icon: "clock" },
+  { to: "/feed", label: "Feed Leads", short: "Feed", icon: "upload" },
   { to: "/crm", label: "Clients / CRM", short: "CRM", icon: "users" },
   { to: "/hotleads", label: "Hot Leads", short: "Hot", icon: "flame" },
   { to: "/pipeline", label: "Pipeline", short: "Pipeline", icon: "funnel" },
@@ -38,6 +41,7 @@ const NAV = [
   { to: "/editor", label: "Clip Editor", short: "Clip", icon: "film" },
   { to: "/manychat", label: "ManyChat", short: "DM Bot", icon: "chat" },
   { to: "/content", label: "Content Posted", short: "Posts", icon: "video" },
+  { to: "/upcoming", label: "Upcoming", short: "Next", icon: "calendar" },
   { to: "/agentos", label: "AgentOS", short: "Agent", icon: "cpu" },
   { to: "/apikeys", label: "API Keys", short: "Keys", icon: "key" },
   { to: "/sitestats", label: "Site Stats", short: "Stats", icon: "chart" },
@@ -60,10 +64,12 @@ const ICONS: Record<string, ReactNode> = {
   play: (<><circle cx="12" cy="12" r="9" /><path d="M10 8.5l5.5 3.5L10 15.5z" /></>),
   film: (<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M3 15h18M8 4v16M16 4v16" /></>),
   chat: (<><path d="M21 12a8 8 0 0 1-8 8H4l2.2-3.3A8 8 0 1 1 21 12z" /><path d="M8.5 12h.01M12 12h.01M15.5 12h.01" /></>),
+  calendar: (<><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /><path d="M12 13.5v2.5l1.8 1" /></>),
   video: (<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9.2l5 2.8-5 2.8z" /></>),
   cpu: (<><rect x="5" y="5" width="14" height="14" rx="2" /><rect x="9" y="9" width="6" height="6" rx="1" /><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" /></>),
   bulb: (<><path d="M9 18h6M10 21h4" /><path d="M12 3a6 6 0 0 1 4 10.4c-.7.7-1 1.6-1 2.6H9c0-1-.3-1.9-1-2.6A6 6 0 0 1 12 3z" /></>),
   key: (<><circle cx="8" cy="14" r="4" /><path d="M11 11 20 2" /><path d="M16.5 5.5 19 8M14 8l1.5 1.5" /></>),
+  upload: (<><path d="M12 16V4" /><path d="M7.5 8.5 12 4l4.5 4.5" /><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" /></>),
 };
 
 function Icon({ name, className = "" }: { name: string; className?: string }) {
@@ -188,6 +194,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/activity" element={<Activity />} />
+          <Route path="/feed" element={<Feed />} />
           <Route path="/crm" element={<Crm />} />
           <Route path="/hotleads" element={<HotLeads />} />
           <Route path="/pipeline" element={<Pipeline />} />
@@ -198,6 +205,7 @@ export default function App() {
           <Route path="/editor" element={<ClipEditor />} />
           <Route path="/manychat" element={<ManyChat />} />
           <Route path="/content" element={<ContentPosted />} />
+          <Route path="/upcoming" element={<Upcoming />} />
           <Route path="/agentos" element={<AgentOS />} />
           <Route path="/apikeys" element={<ApiKeys />} />
           <Route path="/emails" element={<Emails />} />

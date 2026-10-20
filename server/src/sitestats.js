@@ -48,6 +48,48 @@ export const SITES = {
 // top queries.
 const ANON_QUERY = "(anonymized long-tail)";
 
+// ─── off-intent queries ───────────────────────────────────────────────────
+// Search Console counts every impression Google decides to show us for, and
+// Google is loose about it. The single biggest "top query" on the epoxy site is
+// "trailer floor repair services mahwah, nj" at position 75 — 105 impressions
+// that will never convert, sitting on top of a list meant to show what is
+// working. There is nothing to fix on the site: no trailer page exists, Google
+// is just fuzzy-matching /locations/mahwah on "mahwah" + "floor" + "repair".
+//
+// So this does not touch the site, it fixes the REPORT. Off-intent impressions
+// are still counted (hiding data is how dashboards start lying) but they are
+// split out, so the headline number reflects work we can actually win.
+//
+// Two ways a query is off-intent:
+//   1. It wants something we do not sell. We coat floors; we do not lay pavers,
+//      sell supplies, or franchise.
+//   2. It names a place outside the Bergen County service area. Same-state is
+//      not close enough: Turnersville is a 100-mile drive.
+// Both lists are meant to be appended to as new junk shows up in the report.
+
+const OFF_SERVICE = [
+  "trailer", "paver", "franchise", "depot", "supplier", "supply",
+  "wholesale", "diy", "kit", "lowes", "menards", "home depot",
+  "rustoleum", "rust-oleum", "sherwin", "behr", "salary", "jobs", "hiring",
+];
+
+// Towns/regions seen in the query data that we do not serve. Bergen County
+// towns are NOT listed here — only places outside the service area.
+const OFF_AREA = [
+  "haddonfield", "salem", "turnersville", "cave creek", "geneva",
+  "east meadow", "point pleasant", "toms river", "cherry hill", "vineland",
+  "atlantic city", "trenton", "camden", "brooklyn", "queens", "long island",
+];
+
+/** Why a query cannot convert, or "" when it looks like real local demand. */
+export function offIntent(query) {
+  const q = String(query || "").toLowerCase();
+  for (const t of OFF_SERVICE) if (q.includes(t)) return "service";
+  for (const t of OFF_AREA) if (q.includes(t)) return "area";
+  return "";
+}
+
+
 const TZ = "America/New_York";
 
 function dayKey(d) {
@@ -58,6 +100,13 @@ function dayKey(d) {
 
 function dayOffset(n) {
   return dayKey(new Date(Date.now() + n * 86400000));
+}
+
+// Step a YYYY-MM-DD key by n days. Anchored at midday UTC so a daylight-saving
+// shift can never round the result into the neighbouring date.
+function shiftDay(key, n) {
+  const [y, m, d] = key.split("-").map(Number);
+  return dayKey(new Date(Date.UTC(y, m - 1, d, 12) + n * 86400000));
 }
 
 // ---------------------------------------------------------------- traffic ---
@@ -83,7 +132,7 @@ async function fetchTraffic(site) {
            countIf(event = 'generate_lead')  AS leads,
            countIf(event = 'quote_estimate') AS estimates
     FROM events
-    WHERE timestamp >= now() - INTERVAL 8 DAY
+    WHERE timestamp >= now() - INTERVAL 120 DAY
     GROUP BY day
     ORDER BY day DESC`;
 
@@ -161,14 +210,37 @@ function isSyntheticLead(r) {
   return false;
 }
 
-async function fetchLeads(site) {
-  const res = await fetch(`${site.leadsEndpoint}?type=leads&n=200`, {
-    redirect: "follow",
-  });
-  if (!res.ok) return { ok: false, error: `Lead sheet ${res.status}` };
+/**
+ * GET the Apps Script web app and parse its JSON.
+ *
+ * The /exec URL 302s to script.googleusercontent.com, and that hop fails often
+ * enough to matter: three probes on 2026-09-02 returned an empty body, a 404
+ * and then valid JSON with no change in between. A single miss used to render
+ * as "no leads", which is the one wrong answer this dashboard must never give.
+ * One retry turns almost all of them into a correct read.
+ */
+async function fetchSheet(url, attempts = 2) {
+  let last = "";
+  for (let i = 0; i < attempts; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 700));
+    try {
+      const res = await fetch(url, { redirect: "follow" });
+      if (!res.ok) { last = `HTTP ${res.status}`; continue; }
+      const body = await res.text();
+      // An Apps Script that throws answers with an HTML error page, not JSON.
+      const json = JSON.parse(body);
+      if (json && json.ok) return { json };
+      last = "unexpected body";
+    } catch (err) {
+      last = String(err.message || err);
+    }
+  }
+  return { error: last || "no response" };
+}
 
-  const json = await res.json().catch(() => null);
-  if (!json || !json.ok) return { ok: false, error: "Lead sheet returned an unexpected body" };
+async function fetchLeads(site) {
+  const { json, error } = await fetchSheet(`${site.leadsEndpoint}?type=leads&n=200`);
+  if (!json) return { ok: false, error: `Lead sheet unreachable (${error})` };
 
   // Rows arrive newest first. Blank rows are the signature of the old Apps
   // Script failing to parse a payload, so they are surfaced rather than hidden:
@@ -206,12 +278,48 @@ async function fetchLeads(site) {
     blankRows: rows.filter((r) => r.blank).length,
     syntheticRows: synthetic.length,
     recent: real.slice(0, 12),
+    rows: real,
   };
+}
+
+// ------------------------------------------------------------------ calls ---
+
+// Phone calls, from the Calls tab the Apps Script fills out of Google Voice
+// notification mail. This is the channel that was invisible until 2026-09-02:
+// three real callers left voicemail across three weeks and nothing anywhere
+// showed it, because only form submissions were ever wired to a tab.
+//
+// The tab may not exist yet on a sheet whose Apps Script has not been
+// redeployed, and an Apps Script that throws answers with an HTML error page
+// rather than JSON. Both are reported as "not wired up yet" rather than as an
+// empty-but-working panel, because zero calls and no call tracking look
+// identical on screen and mean opposite things.
+async function fetchCalls(site) {
+  const { json, error } = await fetchSheet(`${site.leadsEndpoint}?type=calls&n=200`);
+  if (!json) return { ok: false, error: `Call sheet unreachable (${error})` };
+
+  const rows = (json.rows || [])
+    .map((r) => {
+      const ts = r.timestamp ? new Date(r.timestamp) : null;
+      return {
+        day: ts && !isNaN(ts) ? dayKey(ts) : null,
+        when: ts && !isNaN(ts) ? ts.toISOString() : null,
+        caller: String(r.caller || ""),
+        name: String(r.name || ""),
+        kind: String(r.kind || "call"),
+        transcript: String(r.transcript || ""),
+      };
+    })
+    // A caller with no number is a row we cannot act on, and Google's own
+    // welcome voicemail is not a lead.
+    .filter((r) => r.caller && !/welcome to google voice/i.test(r.transcript));
+
+  return { ok: true, rows, total: rows.length, recent: rows.slice(0, 12) };
 }
 
 // ----------------------------------------------------------------- search ---
 
-function readSearch(site) {
+function readSearch(site, day) {
   if (!site.gscHistoryCsv || !fs.existsSync(site.gscHistoryCsv)) {
     return {
       ok: false,
@@ -243,9 +351,13 @@ function readSearch(site) {
     if (date > latest) latest = date;
     // Position is weighted by impressions. A flat mean lets a query with one
     // impression at position 3 outweigh one with 50 impressions at position 60.
-    const d = byDay.get(date) || { day: date, impressions: 0, clicks: 0, posSum: 0, n: 0 };
+    const d = byDay.get(date) || { day: date, impressions: 0, clicks: 0, posSum: 0, n: 0, qual: 0, qualClicks: 0 };
     d.impressions += impressions; d.clicks += clicks;
     d.posSum += position * impressions; d.n += impressions;
+    // ANON_QUERY counts as qualified: it is the withheld long tail, mostly real
+    // local demand, and there is no query text to judge it on either way.
+    const off = query === ANON_QUERY ? "" : offIntent(query);
+    if (!off) { d.qual += impressions; d.qualClicks += clicks; }
     byDay.set(date, d);
 
     // ANON_QUERY is the remainder Search Console withholds from the query
@@ -253,61 +365,129 @@ function readSearch(site) {
     // must never appear in a "top queries" list.
     if (query === ANON_QUERY) continue;
 
-    const q = queries.get(query) || { query, impressions: 0, clicks: 0, posSum: 0, n: 0, lastSeen: date };
+    // Keyed by date AND query. It used to key on query alone and then filter on
+    // "last seen on the latest day", which showed each query's LIFETIME totals
+    // under a heading naming a single day. Per-day keys make the panel match its
+    // own label, and are what lets an older day be pulled up at all.
+    const key = date + "\u0000" + query;
+    const q = queries.get(key) || { date, query, impressions: 0, clicks: 0, posSum: 0, n: 0, off };
     q.impressions += impressions; q.clicks += clicks;
     q.posSum += position * impressions; q.n += impressions;
-    if (date > q.lastSeen) q.lastSeen = date;
-    queries.set(query, q);
+    queries.set(key, q);
   }
 
   const days = [...byDay.values()]
-    .map((d) => ({ day: d.day, impressions: d.impressions, clicks: d.clicks, position: d.n ? +(d.posSum / d.n).toFixed(1) : 0 }))
+    .map((d) => ({
+      day: d.day, impressions: d.impressions, clicks: d.clicks,
+      qualified: d.qual, qualifiedClicks: d.qualClicks,
+      position: d.n ? +(d.posSum / d.n).toFixed(1) : 0,
+    }))
     .sort((a, b) => (a.day < b.day ? 1 : -1));
 
-  const top = [...queries.values()]
-    .filter((q) => q.lastSeen === latest)
-    .map((q) => ({ query: q.query, impressions: q.impressions, clicks: q.clicks, position: q.n ? +(q.posSum / q.n).toFixed(1) : 0 }))
-    .sort((a, b) => b.impressions - a.impressions)
-    .slice(0, 15);
+  const shape = (q) => ({
+    query: q.query, impressions: q.impressions, clicks: q.clicks,
+    position: q.n ? +(q.posSum / q.n).toFixed(1) : 0, off: q.off,
+  });
+  // The requested day if Search Console has reached it, otherwise the newest day
+  // it has. Falling back silently would be a lie, so `hasDay` tells the page which
+  // of the two it is looking at.
+  const target = day && byDay.has(day) ? day : latest;
+  const live = [...queries.values()].filter((q) => q.date === target);
+  const byImpr = (a, b) => b.impressions - a.impressions;
+
+  const top = live.filter((q) => !q.off).map(shape).sort(byImpr).slice(0, 15);
+  // Shown, not hidden. Ted needs to see WHY the headline dropped, and the list
+  // is what tells us which term to add to OFF_SERVICE / OFF_AREA next.
+  const offQueries = live.filter((q) => q.off).map(shape).sort(byImpr).slice(0, 10);
+  const offTotals = live.filter((q) => q.off).reduce(
+    (acc, q) => ({ impressions: acc.impressions + q.impressions, clicks: acc.clicks + q.clicks }),
+    { impressions: 0, clicks: 0 },
+  );
 
   return {
     ok: true,
     // Google's data is 2-3 days behind, so labelling this "today" would be a
     // lie. The dashboard shows the date it actually covers.
     latestDay: latest,
-    days: days.slice(0, 8),
+    day: target,
+    hasDay: !!day && byDay.has(day),
+    selected: days.find((d) => d.day === target) || null,
+    days: days.slice(0, 120),
     topQueries: top,
+    offQueries,
+    offTotals,
     stale: latest < dayOffset(-4),
   };
 }
 
 // ------------------------------------------------------------------- api ----
 
-export async function siteStats(siteId = "epoxy") {
+export async function siteStats(siteId = "epoxy", requestedDay = "") {
   const site = SITES[siteId];
   if (!site) throw new Error(`unknown site: ${siteId}`);
 
+  // The day being looked at. Anything malformed or in the future falls back to
+  // today rather than erroring: a bad querystring should not blank the page.
+  const today = dayOffset(0);
+  const day =
+    /^\d{4}-\d{2}-\d{2}$/.test(requestedDay) && requestedDay <= today ? requestedDay : today;
+  const prevDay = shiftDay(day, -1);
+
   // Independent sources run together and settle independently: a PostHog
   // outage must not take the lead count down with it.
-  const [traffic, leads] = await Promise.all([
+  const [traffic, leads, calls] = await Promise.all([
     fetchTraffic(site).catch((e) => ({ ok: false, error: String(e.message || e) })),
     fetchLeads(site).catch((e) => ({ ok: false, error: String(e.message || e) })),
+    fetchCalls(site).catch((e) => ({ ok: false, error: String(e.message || e) })),
   ]);
 
   let search;
   try {
-    search = readSearch(site);
+    search = readSearch(site, day);
   } catch (err) {
     search = { ok: false, error: String(err.message || err) };
+  }
+
+  // Slice each source down to the chosen day and the one before it, so every
+  // panel on the page is describing the same 24 hours.
+  const blank = { views: 0, visitors: 0, calls: 0, forms: 0, leads: 0, estimates: 0 };
+  if (traffic.ok) {
+    const pick = (k) => (traffic.days || []).find((d) => d.day === k) || { day: k, ...blank };
+    traffic.selected = pick(day);
+    traffic.previous = pick(prevDay);
+    // PostHog only holds the queried window, so a day older than it reads as a
+    // real zero unless the page is told the difference.
+    traffic.earliestDay = (traffic.days || []).map((d) => d.day).sort()[0] || null;
+    traffic.inRange = !traffic.earliestDay || day >= traffic.earliestDay;
+  }
+  if (leads.ok) {
+    const rows = leads.rows || [];
+    leads.onDay = rows.filter((r) => r.day === day);
+    leads.selected = leads.onDay.length;
+    leads.previous = rows.filter((r) => r.day === prevDay).length;
+    leads.days = [...new Set(rows.map((r) => r.day).filter(Boolean))];
+    delete leads.rows;
+  }
+  if (calls.ok) {
+    const rows = calls.rows || [];
+    calls.onDay = rows.filter((r) => r.day === day);
+    calls.selected = calls.onDay.length;
+    calls.previous = rows.filter((r) => r.day === prevDay).length;
+    calls.days = [...new Set(rows.map((r) => r.day).filter(Boolean))];
+    delete calls.rows;
   }
 
   return {
     site: { id: siteId, label: site.label, domain: site.domain },
     generatedAt: new Date().toISOString(),
-    today: dayOffset(0),
+    day,
+    prevDay,
+    today,
+    isToday: day === today,
     yesterday: dayOffset(-1),
     traffic,
     leads,
+    calls,
     search,
   };
 }

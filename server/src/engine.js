@@ -1,11 +1,12 @@
 // The morning cold-email run: bank → (one scrape) → verify → send → bank rest.
 // Server-side steps run here; the scrape executes on the user's Mac via the jobs queue.
-import { db } from "./db.js";
-import { findCeo, amfConfigured } from "./anymailfinder.js";
+import { db, syncMarketStates } from "./db.js";
+import { findCeo, verifyEmail, amfConfigured } from "./anymailfinder.js";
 import { sendTelegram } from "./telegram.js";
 import { sendingInboxes, sendVia, isSmtp } from "./pool.js";
 import { smtpInboxCap, smtpFirstName } from "./smtp.js";
-import { isSuppressed } from "./replies.js";
+import dns from "node:dns/promises";
+import { isSuppressed, suppress } from "./replies.js";
 import { scrapeGoogleMaps, apifyConfigured } from "./scrape.js";
 import { sendDailyReport } from "./report.js";
 import { randomUUID } from "node:crypto";
@@ -113,7 +114,7 @@ function inboxEligible(inbox) {
 // Backstop dedup: has this exact recipient address EVER received an initial, even if
 // its lead row was later reset? Reads the emails table directly (join to the lead the
 // email went to), so a status glitch can't resurface a burned address.
-function alreadyEmailedAddress(email) {
+export function alreadyEmailedAddress(email) {
   if (!email) return false;
   return Boolean(
     db
@@ -171,25 +172,80 @@ export function runningRunId() {
 // run with scraping discovers fewer than EXHAUST_NEW_MIN never-contacted businesses,
 // the market retires and the next fresh one is promoted. Exhausted markets are never
 // scraped again — no Apify credits spent re-scraping a drained city.
+//
+// "Next" means ORDER BY state_rank, id: every city in the current state gets worked
+// before we cross a border (state_rank is set in db.js from STATE_ROTATION). Ordering
+// by raw id instead meant the successor was whatever city was typed in first, which
+// on Sep 4 sent a drained Bergen County straight to Miami FL while four fresh NJ
+// counties sat unused.
 const EXHAUST_NEW_MIN = 10;
+// Markets are added by hand-run SQL, so a row can appear between boots with no
+// state_rank. Rank it before we sort, or SQLite's NULLS FIRST hands it the queue.
+const ORDER = "ORDER BY state_rank IS NULL, state_rank, priority, id";
 export function marketForToday() {
-  let m = db.prepare("SELECT * FROM markets WHERE status='active' ORDER BY id LIMIT 1").get();
+  const unplaced = syncMarketStates();
+  if (unplaced.length) {
+    logEvent({
+      actor: "research",
+      message: `Market${unplaced.length === 1 ? "" : "s"} with no readable state code, queued last: ${unplaced.join(", ")}. Rename to end in a 2-letter state ("Boise ID") to slot into the rotation.`,
+      level: "warn",
+    });
+  }
+  let m = db.prepare(`SELECT * FROM markets WHERE status='active' ${ORDER} LIMIT 1`).get();
   if (!m) {
-    m = db.prepare("SELECT * FROM markets WHERE status='fresh' ORDER BY id LIMIT 1").get();
+    m = db.prepare(`SELECT * FROM markets WHERE status='fresh' ${ORDER} LIMIT 1`).get();
     if (m) {
       db.prepare("UPDATE markets SET status='active' WHERE id=?").run(m.id);
-      logEvent({ actor: "research", message: `New market opened: ${m.name}. All scraping hunts there until it dries up.`, level: "success" });
+      const left = db
+        .prepare("SELECT COUNT(*) n FROM markets WHERE status='fresh' AND state IS ?")
+        .get(m.state ?? null)?.n ?? 0;
+      const where = m.state ? `${m.state} ${left === 1 ? "city" : "cities"}` : "unplaced markets";
+      logEvent({
+        actor: "research",
+        message: `New market opened: ${m.name}. All scraping hunts there until it dries up. ${left} more ${where} queued behind it.`,
+        level: "success",
+      });
     }
   }
   return m || null;
 }
+// Every source of leads should be visible in one place. A scrape gets a batch row
+// exactly like an uploaded CSV does, so /feed shows "Chicago North Shore IL — 140
+// leads, 53 ready" beside anything Ted feeds by hand. Priority 50 keeps the queue
+// order identical to before (fed batches default to 10 and still go first).
+export function batchForScrape(name, niche) {
+  if (!name) return null;
+  const existing = db.prepare("SELECT id FROM lead_batches WHERE name=? AND source='scrape'").get(name);
+  if (existing) return Number(existing.id);
+  const info = db
+    .prepare("INSERT INTO lead_batches (name, source, niche, status, priority, row_count) VALUES (?, 'scrape', ?, 'active', 50, 0)")
+    .run(name, niche || getSetting("niche") || null);
+  return Number(info.lastInsertRowid);
+}
+// Attach freshly-ingested leads to a batch and keep its row_count honest.
+export function tagLeadsWithBatch(ids, batchId) {
+  if (!batchId || !ids?.length) return 0;
+  const upd = db.prepare("UPDATE leads SET batch_id=? WHERE id=? AND batch_id IS NULL");
+  let n = 0;
+  for (const id of ids) n += upd.run(batchId, id).changes;
+  db.prepare("UPDATE lead_batches SET row_count=(SELECT COUNT(*) FROM leads WHERE batch_id=?) WHERE id=?").run(batchId, batchId);
+  return n;
+}
+
 function recordMarketRun(market, newCount, scraped) {
   if (!market || !scraped) return; // bank-only runs say nothing about the market
   db.prepare("UPDATE markets SET runs_used=runs_used+1, last_run_at=datetime('now'), last_new_count=? WHERE id=?").run(newCount, market.id);
   if (newCount < EXHAUST_NEW_MIN) {
     db.prepare("UPDATE markets SET status='exhausted' WHERE id=?").run(market.id);
-    const next = db.prepare("SELECT name FROM markets WHERE status='fresh' ORDER BY id LIMIT 1").get();
-    logEvent({ actor: "research", message: `${market.name} is tapped out (only ${newCount} new businesses this run) — retired, never re-scraped. ${next ? `Tomorrow hunts: ${next.name}.` : "NO FRESH MARKETS LEFT — add more."}`, level: "warn" });
+    const next = db.prepare(`SELECT name, state FROM markets WHERE status='fresh' ${ORDER} LIMIT 1`).get();
+    // Crossing a state line is worth saying out loud — it means a whole state is
+    // spent, and it changes who we're writing to.
+    const crossing = next && market.state && next.state && next.state !== market.state;
+    const plan = next
+      ? `Tomorrow hunts: ${next.name}.${crossing ? ` ${market.state} is fully drained — moving into ${next.state}.` : ""}`
+      : "NO FRESH MARKETS LEFT — add more.";
+    logEvent({ actor: "research", message: `${market.name} is tapped out (only ${newCount} new businesses this run) — retired, never re-scraped. ${plan}`, level: "warn" });
+    if (crossing) sendTelegram(`Tedca OS: ${market.state} is fully worked. Next state up: ${next.state} (${next.name}).`).catch(() => {});
   }
 }
 
@@ -197,22 +253,38 @@ export async function startMorningRun({ target, query }) {
   if (activeRun) throw new Error(`run ${activeRun} already in progress`);
   const niche = getSetting("niche");
   const city = getSetting("city");
-  const market = query ? null : marketForToday();
+  // Queue mode (auto_refill=0): the fed queue is the only supply. marketForToday()
+  // has side effects (promotes the next fresh city), so it must not even be CALLED
+  // unless we intend to scrape.
+  const refill = Boolean(query) || autoRefill();
+  const market = query || !refill ? null : marketForToday();
   // Guard: an auto-run with no city left must NOT silently re-scrape the drained
   // default city. The old `getSetting("search_query")` / `niche in city` fallback
   // re-hunted tapped-out Miami → ~0 new leads → a mystery-weak day (this starved
   // Jul 15). Stand down and ping so a human queues fresh cities. Manual runs
   // (explicit query) are unaffected.
-  if (!query && !market) {
+  if (refill && !query && !market) {
     const msg = "Out of fresh cities — the market queue is empty. Skipping today's auto-run instead of re-scraping a drained city. Add cities to resume lead flow.";
     logEvent({ actor: "research", message: msg, level: "error" });
     sendTelegram(`🚨 Tedca OS: ${msg}`).catch(() => {});
     return null;
   }
-  const searchQuery = query || market?.query || `${niche} in ${city}`;
+  // Queue mode with nothing to send: stand down for the day (the day claim is kept,
+  // so this fires once) and ask for leads. Not a failure — don't take the failure
+  // path, which releases the day claim and would re-fire every scheduler tick.
+  if (!refill) {
+    const q = queueCounts();
+    if (q.ready === 0 && q.pending === 0) {
+      const msg = "Nothing to send today — the lead queue is empty. Feed leads on /feed and the next run picks them up.";
+      logEvent({ actor: "research", message: msg, level: "error" });
+      await maybeRunwayAlert("queue empty at run time").catch(() => {});
+      return null;
+    }
+  }
+  const searchQuery = refill ? query || market?.query || `${niche} in ${city}` : null;
   const info = db
     .prepare("INSERT INTO runs (agent, status, summary) VALUES ('cold-email', 'running', ?)")
-    .run(`target ${target} · ${market ? `${market.name} · ` : ""}${searchQuery}`);
+    .run(`target ${target} · ${market ? `${market.name} · ` : ""}${searchQuery || "lead queue"}`);
   const runId = Number(info.lastInsertRowid);
   activeRun = runId;
 
@@ -233,13 +305,244 @@ export async function startMorningRun({ target, query }) {
 
 const MAX_SCRAPES_PER_RUN = 2; // cost guard: free Apify tier + $0.50 rule
 
+// ── Verification (shared by the morning run and the verify-ahead loop) ───────
+// Returns true (sendable), false (dead, stamped), "stop" (provider out of credits),
+// or "error" (transient — caller must leave the row untouched so a later pass
+// retries it; stamping on a failure WE caused killed 232 leads on 2026-08-26).
+const defaultVerifyLog = (actor, message, level = "info") => logEvent({ actor, message, level });
+
+// AnyMailFinder credits spent today (ET) — the verify-ahead loop's budget gate.
+// Kept in settings so a restart mid-day can't reset the meter.
+export function verifyCreditsToday() {
+  return Number(getSetting(`verify_credits_${etDate()}`) || 0);
+}
+export function recordVerifyCost(credits, runId = null) {
+  const n = Number(credits) || 0;
+  if (n <= 0) return;
+  const key = `verify_credits_${etDate()}`;
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(settings.value AS REAL) + CAST(excluded.value AS REAL) AS TEXT)"
+  ).run(key, String(n));
+  // keep ~30 days of meters, not one row per day forever
+  db.prepare("DELETE FROM settings WHERE key LIKE 'verify_credits_%' AND key < ?").run(`verify_credits_${etDate(new Date(Date.now() - 30 * 86400000))}`);
+  // dollars are plan-dependent; amf_credit_usd (settings) converts when Ted sets it
+  const usd = n * Number(getSetting("amf_credit_usd") || 0);
+  if (usd > 0) db.prepare("INSERT INTO costs (run_id, provider, amount_usd) VALUES (?, 'anymailfinder', ?)").run(runId, usd);
+}
+
+export async function verifyLead(id, log = defaultVerifyLog, { runId = null } = {}) {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
+  if (!lead) return false;
+  if (lead.email && lead.email_status === "valid") return true;
+  const fed = lead.batch_id != null; // Ted's list IS the targeting — no niche/geo screen for fed leads
+  // off-niche → skip BEFORE AnyMailFinder so we never spend a credit on a non-med-spa
+  if (!fed && isOffNiche(lead.category)) {
+    db.prepare("UPDATE leads SET status='skipped', email_status='off_niche' WHERE id=?").run(id);
+    log("verify", `${lead.business_name}: ${lead.category || "off-niche"} — not a ${getSetting("niche") || "target"} business, skipped before AnyMailFinder (no credit spent).`, "info");
+    return false;
+  }
+  // outside the target states → skip BEFORE AnyMailFinder so we never spend a credit out-of-area
+  if (!fed && isOffGeo(lead.state)) {
+    db.prepare("UPDATE leads SET status='skipped', email_status='off_geo' WHERE id=?").run(id);
+    log("verify", `${lead.business_name}: ${lead.state} — outside the target states, skipped before AnyMailFinder (no credit spent).`, "info");
+    return false;
+  }
+
+  // ── supplied address: VERIFY it, never replace it with a CEO lookup ────────
+  if (lead.supplied_email && lead.email) {
+    const email = String(lead.email).trim().toLowerCase();
+    if (blockedEmailDomain(email, { allowFreeMail: true })) {
+      db.prepare("UPDATE leads SET status='skipped', email_status='platform', followup_due_at=NULL WHERE id=?").run(id);
+      log("verify", `${lead.business_name}: ${email} is a platform address, not the owner — skipping.`, "info");
+      return false;
+    }
+    if (emailContactedElsewhere(email, id) || alreadyEmailedAddress(email)) {
+      db.prepare("UPDATE leads SET status='skipped', email_status='duplicate', followup_due_at=NULL WHERE id=?").run(id);
+      log("verify", `${lead.business_name}: ${email} was already contacted — skipping so we never email the same owner twice.`, "info");
+      return false;
+    }
+    if (isSuppressed(email)) {
+      db.prepare("UPDATE leads SET status='skipped', email_status='suppressed', followup_due_at=NULL WHERE id=?").run(id);
+      log("verify", `${lead.business_name}: ${email} previously bounced or opted out — skipping.`, "info");
+      return false;
+    }
+    if (!amfConfigured()) {
+      // no verifier: the MX gate is the only safety net, so be explicit about it
+      const mx = await domainAcceptsMail(email);
+      if (!mx.ok) {
+        db.prepare("UPDATE leads SET status='skipped', email_status='undeliverable', followup_due_at=NULL WHERE id=?").run(id);
+        suppress(email);
+        log("verify", `${lead.business_name}: ${email} cannot receive mail (${mx.reason}) — skipping.`, "warn");
+        return false;
+      }
+      // NOT 'valid' — nothing verified this address. A distinct status keeps the CRM
+      // honest and keeps queueCounts() from reporting it as ready-to-send.
+      db.prepare("UPDATE leads SET email=?, email_status='mx_only' WHERE id=?").run(email, id);
+      log("verify", `${lead.business_name}: no verifier configured — ${email} passed the MX check only, not verified.`, "warn");
+      return true;
+    }
+    try {
+      const r = await verifyEmail(email);
+      if (r.status === "no_credits") {
+        log("verify", "My email-verification credits ran out — I cannot confirm any more addresses today.", "error");
+        return "stop";
+      }
+      recordVerifyCost(r.credits, runId);
+      if (r.ok) {
+        db.prepare("UPDATE leads SET email=?, email_status='valid' WHERE id=?").run(email, id);
+        log("verify", `${lead.business_name}: ${email} confirmed real — ready to contact.`, "success");
+        return true;
+      }
+      // invalid / risky / unknown → dead for sending; keep the row for the CRM
+      const st = r.status === "invalid" ? "invalid" : r.status === "risky" ? "risky" : "unknown";
+      db.prepare("UPDATE leads SET status='skipped', email_status=?, followup_due_at=NULL WHERE id=?").run(st, id);
+      log("verify", `${lead.business_name}: ${email} did not verify (${st}) — skipping so we never bounce.`, "info");
+      return false;
+    } catch (e) {
+      log("verify", `Hit a snag verifying ${lead.business_name}: ${e.message}`, "warn");
+      return "error";
+    }
+  }
+
+  if (!amfConfigured()) return Boolean(lead.email); // no key: use scraped email as-is
+  if (!lead.domain && !lead.business_name) {
+    db.prepare("UPDATE leads SET email_status='unknown' WHERE id=?").run(id);
+    return false;
+  }
+  try {
+    const r = await findCeo({ domain: lead.domain, companyName: lead.business_name });
+    if (r.status === "no_credits") {
+      log("verify", "My email-finding credits ran out — I cannot confirm any more owner emails today.", "error");
+      return "stop";
+    }
+    recordVerifyCost(r.credits, runId);
+    if (r.ok && blockedEmailDomain(r.email)) {
+      // AMF matched a platform/aggregator (e.g. a Google Maps URL → google.com).
+      // Not the owner — record it but never send.
+      db.prepare("UPDATE leads SET email_status='platform' WHERE id=?").run(id);
+      log("verify", `${lead.business_name}: the only email found was a platform address (${r.email}) — skipping, that is not the owner.`, "info");
+      return false;
+    }
+    if (r.ok && emailContactedElsewhere(r.email, id)) {
+      // same owner email as a lead we've already emailed (e.g. another branch of a
+      // chain) → record it but never queue, so we never email the same person twice.
+      db.prepare("UPDATE leads SET email=?, email_status='duplicate', status='skipped', followup_due_at=NULL WHERE id=?").run(r.email, id);
+      log("verify", `${lead.business_name}: ${r.email} is already a contacted lead — skipping so we never email the same owner twice.`, "info");
+      return false;
+    }
+    if (r.ok && isSuppressed(r.email)) {
+      db.prepare("UPDATE leads SET email=?, email_status='suppressed', status='skipped', followup_due_at=NULL WHERE id=?").run(r.email, id);
+      log("verify", `${lead.business_name}: ${r.email} previously bounced or opted out — skipping.`, "info");
+      return false;
+    }
+    if (r.ok) {
+      db.prepare(
+        "UPDATE leads SET email=?, email_status='valid', ceo_name=COALESCE(?, ceo_name), contact_title=COALESCE(?, contact_title), linkedin_url=COALESCE(?, linkedin_url) WHERE id=?"
+      ).run(r.email, r.name ?? null, r.title ?? null, r.linkedin ?? null, id);
+      log("verify", `${lead.business_name}: found the owner — ${r.email}${r.name ? ` (${r.name})` : ""}${r.linkedin ? " + LinkedIn" : ""}.`, "success");
+      return true;
+    }
+    // not valid — still keep any name/title/LinkedIn AMF returned, for the CRM
+    db.prepare(
+      "UPDATE leads SET email_status=?, ceo_name=COALESCE(?, ceo_name), contact_title=COALESCE(?, contact_title), linkedin_url=COALESCE(?, linkedin_url) WHERE id=?"
+    ).run(r.status || "unknown", r.name ?? null, r.title ?? null, r.linkedin ?? null, id);
+    log("verify", `${lead.business_name}: could not find a safe owner email — skipping so we never bounce.`, "info");
+    return false;
+  } catch (e) {
+    // Transient failure (no network, DNS, timeout, provider 5xx) is NOT a real
+    // "no owner email found". Return "error" so the caller leaves the lead
+    // UNLATCHED and a later run retries it. Returning false here stamped
+    // email_status='unknown', which permanently removed the lead from every
+    // future pool: on 2026-08-26 an 8am run with no network killed 232 leads
+    // this way while spending zero provider credits.
+    log("verify", `Hit a snag looking up ${lead.business_name}: ${e.message}`, "warn");
+    return "error";
+  }
+}
+
+// Post-verify bookkeeping shared by the run's producer and the verify-ahead loop.
+// "error" is deliberately NOT handled here: the row must stay untouched.
+export function settleVerify(id, verdict) {
+  if (verdict === "error" || verdict === "stop") return;
+  // consumed from the pool either way so we don't re-verify endlessly
+  db.prepare("UPDATE leads SET banked=0 WHERE id=?").run(id);
+  if (!verdict) {
+    // dead lead: keep in CRM but out of future pools
+    db.prepare("UPDATE leads SET status='scraped', banked=0, email_status=COALESCE(email_status,'unknown') WHERE id=? AND email IS NULL AND status='scraped'").run(id);
+  }
+}
+
+// ── Lead queue ───────────────────────────────────────────────────────────────
+// The queue is every lead that is still sendable-or-pending. Fed batches sort
+// first (priority 10 by default); scraped leftovers sort as 50. Paused/archived
+// batches are held out entirely.
+// b.id IS NULL covers a lead whose batch row was deleted: without it the LEFT JOIN
+// yields b.status=NULL and every lead in that batch is stranded forever.
+const QUEUE_FROM =
+  "FROM leads l LEFT JOIN lead_batches b ON b.id = l.batch_id " +
+  "WHERE l.status='scraped' AND (l.batch_id IS NULL OR b.id IS NULL OR b.status='active')";
+const QUEUE_ORDER = "ORDER BY COALESCE(b.priority, 50), CASE WHEN l.email_status='valid' THEN 0 ELSE 1 END, l.banked DESC, l.id";
+export const autoRefill = () => getSetting("auto_refill") === "1";
+export function queueCounts() {
+  const ready = db.prepare(`SELECT COUNT(*) c ${QUEUE_FROM} AND l.email_status='valid' AND l.email IS NOT NULL`).get().c;
+  const pending = db.prepare(`SELECT COUNT(*) c ${QUEUE_FROM} AND l.email_status IS NULL`).get().c;
+  return { ready, pending };
+}
+export function queuePick(limit, { pendingOnly = false } = {}) {
+  const pred = pendingOnly ? "AND l.email_status IS NULL" : "AND (l.email_status IS NULL OR l.email_status='valid')";
+  return db.prepare(`SELECT l.id ${QUEUE_FROM} ${pred} ${QUEUE_ORDER} LIMIT ?`).all(limit).map((r) => r.id);
+}
+
+// Observed AnyMailFinder valid share over the last 30 days (floor 0.35 while the
+// sample is thin) — used to price a batch and to estimate runway from pending rows.
+export function observedValidRate() {
+  const r = db
+    .prepare(
+      "SELECT SUM(email_status='valid') v, COUNT(*) n FROM leads WHERE email_status IS NOT NULL AND email_status NOT IN ('off_niche','off_geo','duplicate','dup_recipient','suppressed') AND scraped_at >= datetime('now','-30 day')"
+    )
+    .get();
+  if (!r || !r.n || r.n < 50) return 0.35;
+  return Math.max(0.1, Math.min(0.95, r.v / r.n));
+}
+// How many days the queue covers. perDay is the SMALLER of daily_target and what
+// the eligible inboxes can actually push, so the estimate never flatters.
+export function queueRunway() {
+  const { ready, pending } = queueCounts();
+  const validRate = observedValidRate();
+  const target = Number(getSetting("daily_target") || 100);
+  let capacity = 0;
+  try { for (const i of activeInboxes()) capacity += capFor(i.email); } catch { capacity = target; }
+  const perDay = Math.max(1, Math.min(target, capacity || target));
+  const expected = ready + pending * validRate;
+  return { ready, pending, validRate: Number(validRate.toFixed(2)), perDay, expected: Math.round(expected), days: Number((expected / perDay).toFixed(1)) };
+}
+export function runwayLine(r = queueRunway()) {
+  return `Queue: ${r.ready} ready, ${r.pending} waiting on verification (~${r.days} day${r.days === 1 ? "" : "s"} at ${r.perDay}/day)`;
+}
+// One "feed me" Telegram per ET day when runway drops under runway_alert_days.
+export async function maybeRunwayAlert(reason = "") {
+  const r = queueRunway();
+  const threshold = Number(getSetting("runway_alert_days") || 3);
+  if (r.days >= threshold) return false;
+  const today = etDate();
+  if (getSetting("runway_alert_date") === today) return false;
+  db.prepare("INSERT INTO settings (key, value) VALUES ('runway_alert_date', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(today);
+  const url = `${process.env.PUBLIC_URL || "http://localhost:5173"}/feed`;
+  const msg = `🥣 Tedca OS needs leads${reason ? ` (${reason})` : ""}.\n${runwayLine(r)}.\nFeed a CSV / paste / Sheet → ${url}`;
+  logEvent({ actor: "intake", message: `${runwayLine(r)} — under the ${threshold}-day line, asked Ted for more leads.`, level: "warn" });
+  await sendTelegram(msg).catch(() => {});
+  return true;
+}
+
 async function executeRun(runId, { target, searchQuery, market = null }) {
   const log = (actor, message, level = "info") => logEvent({ run_id: runId, actor, message, level });
   let newDiscovered = 0; // never-contacted businesses found by this run's scrapes (market exhaustion signal)
   let scrapeCompleted = false; // ONLY a scrape that actually returned results is exhaustion evidence — a fetch that died (Jul 7 DNS blip) says nothing about the market
 
   // ── Step 1: Scout — the brief ──────────────────────────────────────────────
-  log("research", `Good morning. Today's plan: find ${target} ${getSetting("niche")} leads ("${searchQuery}") and email each one's owner.`, "info");
+  log("research", searchQuery
+    ? `Good morning. Today's plan: find ${target} ${getSetting("niche")} leads ("${searchQuery}") and email each one's owner.`
+    : `Good morning. Today's plan: email ${target} owners from the lead queue (no scraping — auto-refill is off).`, "info");
 
   // Producer/consumer: Inspector keeps a queue of verified leads topped up
   // (scraping more when supply runs dry) WHILE Courier sends from the queue.
@@ -248,102 +551,57 @@ async function executeRun(runId, { target, searchQuery, market = null }) {
   let producing = true;
   let scrapesUsed = 0;
 
-  async function verifyOne(id) {
-    const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
-    if (!lead) return false;
-    if (lead.email && lead.email_status === "valid") return true;
-    // off-niche → skip BEFORE AnyMailFinder so we never spend a credit on a non-med-spa
-    if (isOffNiche(lead.category)) {
-      db.prepare("UPDATE leads SET status='skipped', email_status='off_niche' WHERE id=?").run(id);
-      log("verify", `${lead.business_name}: ${lead.category || "off-niche"} — not a med spa, skipped before AnyMailFinder (no credit spent).`, "info");
-      return false;
-    }
-    // outside New Jersey → skip BEFORE AnyMailFinder so we never spend a credit out-of-area
-    if (isOffGeo(lead.state)) {
-      db.prepare("UPDATE leads SET status='skipped', email_status='off_geo' WHERE id=?").run(id);
-      log("verify", `${lead.business_name}: ${lead.state} — outside New Jersey, skipped before AnyMailFinder (no credit spent).`, "info");
-      return false;
-    }
-    if (!amfConfigured()) return Boolean(lead.email); // no key: use scraped email as-is
-    if (!lead.domain && !lead.business_name) return false;
-    try {
-      const r = await findCeo({ domain: lead.domain, companyName: lead.business_name });
-      if (r.status === "no_credits") {
-        log("verify", "My email-finding credits ran out — I cannot confirm any more owner emails today.", "error");
-        return "stop";
-      }
-      if (r.ok && blockedEmailDomain(r.email)) {
-        // AMF matched a platform/aggregator (e.g. a Google Maps URL → google.com).
-        // Not the owner — record it but never send.
-        db.prepare("UPDATE leads SET email_status='platform' WHERE id=?").run(id);
-        log("verify", `${lead.business_name}: the only email found was a platform address (${r.email}) — skipping, that is not the owner.`, "info");
-        return false;
-      }
-      if (r.ok && emailContactedElsewhere(r.email, id)) {
-        // same owner email as a lead we've already emailed (e.g. another branch of a
-        // chain) → record it but never queue, so we never email the same person twice.
-        db.prepare("UPDATE leads SET email=?, email_status='duplicate', status='skipped', followup_due_at=NULL WHERE id=?").run(r.email, id);
-        log("verify", `${lead.business_name}: ${r.email} is already a contacted lead — skipping so we never email the same owner twice.`, "info");
-        return false;
-      }
-      if (r.ok && isSuppressed(r.email)) {
-        db.prepare("UPDATE leads SET email=?, email_status='suppressed', status='skipped', followup_due_at=NULL WHERE id=?").run(r.email, id);
-        log("verify", `${lead.business_name}: ${r.email} previously bounced or opted out — skipping.`, "info");
-        return false;
-      }
-      if (r.ok) {
-        db.prepare(
-          "UPDATE leads SET email=?, email_status='valid', ceo_name=COALESCE(?, ceo_name), contact_title=COALESCE(?, contact_title), linkedin_url=COALESCE(?, linkedin_url) WHERE id=?"
-        ).run(r.email, r.name ?? null, r.title ?? null, r.linkedin ?? null, id);
-        log("verify", `${lead.business_name}: found the owner — ${r.email}${r.name ? ` (${r.name})` : ""}${r.linkedin ? " + LinkedIn" : ""}.`, "success");
-        return true;
-      }
-      // not valid — still keep any name/title/LinkedIn AMF returned, for the CRM
-      db.prepare(
-        "UPDATE leads SET email_status=?, ceo_name=COALESCE(?, ceo_name), contact_title=COALESCE(?, contact_title), linkedin_url=COALESCE(?, linkedin_url) WHERE id=?"
-      ).run(r.status || "unknown", r.name ?? null, r.title ?? null, r.linkedin ?? null, id);
-      log("verify", `${lead.business_name}: could not find a safe owner email — skipping so we never bounce.`, "info");
-      return false;
-    } catch (e) {
-      log("verify", `Hit a snag looking up ${lead.business_name}: ${e.message}`, "warn");
-      return false;
-    }
-  }
+  const verifyOne = (id) => verifyLead(id, log, { runId });
 
   async function producer() {
     let supplied = 0;
+    // If the provider is unreachable, every lookup fails instantly. Abort the run
+    // rather than churn the whole bank through a dead network.
+    const VERIFY_ERROR_ABORT = 5;
+    let consecutiveErrors = 0;
     try {
       while (supplied < target) {
         // take whatever unworked leads we have (bank + freshly scraped)
         // exclude leads already screened-and-failed (email_status set but no usable email)
-        const pool = db
-          .prepare(
-            "SELECT id FROM leads WHERE status='scraped' AND (email IS NOT NULL OR email_status IS NULL) ORDER BY banked DESC, id LIMIT ?"
-          )
-          .all(target * 3)
-          .map((r) => r.id);
+        const pool = queuePick(target * 3);
 
         let pushedThisPass = 0;
         for (const id of pool) {
           if (supplied >= target) break;
           const v = await verifyOne(id);
           if (v === "stop") return;
-          // mark as consumed from the pool either way so we don't re-verify endlessly
-          db.prepare("UPDATE leads SET banked=0 WHERE id=?").run(id);
-          if (v) {
-            if (!enqueued.has(id)) {
-              queue.push(id);
-              enqueued.add(id);
-              supplied++;
-              pushedThisPass++;
+          if (v === "error") {
+            // Transient: leave the lead untouched (still banked, still eligible) so
+            // it is retried later. Never mark it dead on a failure we caused.
+            if (++consecutiveErrors >= VERIFY_ERROR_ABORT) {
+              log(
+                "verify",
+                `${consecutiveErrors} lookups in a row could not reach the email provider — stopping this run so the rest of the bank stays usable. No leads were marked dead.`,
+                "error"
+              );
+              return;
             }
-          } else {
-            // dead lead: keep in CRM but out of future pools
-            db.prepare("UPDATE leads SET status='scraped', banked=0, email_status=COALESCE(email_status,'unknown') WHERE id=? AND email IS NULL").run(id);
+            continue;
+          }
+          consecutiveErrors = 0;
+          settleVerify(id, v);
+          if (v && !enqueued.has(id)) {
+            queue.push(id);
+            enqueued.add(id);
+            supplied++;
+            pushedThisPass++;
           }
         }
 
         if (supplied >= target) break;
+
+        // Queue mode (default): the fed queue is the supply. When it can't cover the
+        // day we send what we have and ask for more — we do NOT go dig up a city.
+        if (!autoRefill() || !searchQuery) {
+          const q = queueCounts();
+          log("scrape", `Queue is empty for today: ${supplied} of ${target} ready, ${q.pending} still waiting on verification. Feed more leads on /feed (auto-refill is off, so no scraping).`, supplied ? "warn" : "error");
+          break;
+        }
 
         // Not enough sendable leads — scrape more WITHOUT stopping the sender.
         if (scrapesUsed >= MAX_SCRAPES_PER_RUN) {
@@ -361,6 +619,8 @@ async function executeRun(runId, { target, searchQuery, market = null }) {
         log("scrape", `Not enough leads yet (${supplied} of ${target} ready). Going to Google Maps for more businesses — emails keep going out in the meantime. (scrape ${scrapesUsed} of ${MAX_SCRAPES_PER_RUN} allowed today)`, "warn");
         const scraped = await runScrapeJob(runId, { search: searchQuery, limit: perSearch });
         const inserted = ingestLeads(scraped, searchQuery);
+        // show this scrape on the Feed page alongside uploaded batches
+        if (market?.name) tagLeadsWithBatch(inserted, batchForScrape(market.name, getSetting("niche")));
         newDiscovered += inserted.length;
         scrapeCompleted = true;
         log("scrape", `Found ${scraped.length} businesses on the map — ${inserted.length} are new ones we have never contacted.`, inserted.length ? "success" : "warn");
@@ -375,9 +635,13 @@ async function executeRun(runId, { target, searchQuery, market = null }) {
     }
   }
 
-  // start with the bank
-  const bankCount = db.prepare("SELECT COUNT(*) c FROM leads WHERE banked=1 AND status='scraped'").get().c;
-  log("scrape", `Checking the lead bank first: ${bankCount} saved lead${bankCount === 1 ? "" : "s"} from before${bankCount >= target ? " — that covers today, no new scraping needed (free)" : ""}.`, "info");
+  // start with the queue — count only what can actually be sent (valid) or is still
+  // pending. The old "N saved leads" line counted rows that had ALREADY failed
+  // verification, which is how a 1,439-lead "bank" produced a zero-send day.
+  {
+    const q = queueCounts();
+    log("scrape", `Checking the lead queue first: ${q.ready} ready to send, ${q.pending} waiting on verification${q.ready >= target ? " — that covers today" : ""}.`, "info");
+  }
 
   // ── Steps 2–5 run CONCURRENTLY: producer fills, Courier drains ────────────
   // catch immediately so a scrape failure can never crash the process
@@ -390,12 +654,14 @@ async function executeRun(runId, { target, searchQuery, market = null }) {
   const sent = await sendFromQueue(runId, queue, () => producing, target);
   await producerDone;
 
-  // bank whatever wasn't emailed today
+  // bank whatever wasn't emailed today — ALIVE rows only (valid or still pending).
+  // Re-banking dead rows is what made the bank count lie.
   const leftovers = db
-    .prepare("SELECT COUNT(*) c FROM leads WHERE status='scraped'")
+    .prepare("SELECT COUNT(*) c FROM leads WHERE status='scraped' AND (email_status='valid' OR email_status IS NULL)")
     .get().c;
-  db.prepare("UPDATE leads SET banked=1 WHERE status='scraped'").run();
-  log("scrape", `Saved ${leftovers} untouched lead${leftovers === 1 ? "" : "s"} in the bank for tomorrow (free head start).`, "info");
+  db.prepare("UPDATE leads SET banked=1 WHERE status='scraped' AND (email_status='valid' OR email_status IS NULL)").run();
+  db.prepare("UPDATE leads SET banked=0 WHERE status='scraped' AND banked=1 AND email_status IS NOT NULL AND email_status<>'valid'").run();
+  log("scrape", `Saved ${leftovers} untouched lead${leftovers === 1 ? "" : "s"} in the queue for tomorrow (free head start).`, "info");
 
   db.prepare("UPDATE runs SET status='done', finished_at=datetime('now'), summary=? WHERE id=?").run(
     `${sent} emailed, ${leftovers} banked`,
@@ -404,11 +670,13 @@ async function executeRun(runId, { target, searchQuery, market = null }) {
   // market bookkeeping: retire the metro only when a COMPLETED scrape stops yielding
   // new businesses (a failed fetch is not evidence — it wrongly retired Scottsdale once)
   recordMarketRun(market, newDiscovered, scrapeCompleted);
-  log("system", `Morning run finished. ${sent} email${sent === 1 ? "" : "s"} sent, ${leftovers} lead${leftovers === 1 ? "" : "s"} saved for tomorrow.`, "success");
+  const runway = queueRunway();
+  log("system", `Morning run finished. ${sent} email${sent === 1 ? "" : "s"} sent. ${runwayLine(runway)}.`, "success");
   await sendTelegram(
-    `☀️ Morning run done\n· ${sent} emails sent\n· ${leftovers} leads banked for tomorrow\n· search: ${searchQuery}\nDashboard → ${process.env.PUBLIC_URL || "https://tedca-os-production.up.railway.app"}`
+    `☀️ Morning run done\n· ${sent} emails sent\n· ${runwayLine(runway)}\n· source: ${searchQuery || "lead queue"}\nDashboard → ${process.env.PUBLIC_URL || "https://tedca-os-production.up.railway.app"}`
   );
   activeRun = null;
+  await maybeRunwayAlert("after today's run").catch(() => {});
 }
 
 // ── scrape: cloud-native (Apify direct) with Mac-worker fallback ─────────────
@@ -467,7 +735,7 @@ const OFF_NICHE_CATEGORY = /cannabis|dispensary|smoke shop|vape|\brestaurant\b|\
 // True when a category is clearly NOT a dental practice (and not dental-adjacent).
 // Used to drop leads at scrape time AND again right before AnyMailFinder, so we never
 // spend a verification credit on a pharmacy, a hospital, a dental lab, an insurer.
-function isOffNiche(category) {
+export function isOffNiche(category) {
   const c = String(category || "");
   if (!c) return false;
   if (HARD_OFF_CATEGORY.test(c)) return true;
@@ -482,9 +750,9 @@ function isOffNiche(category) {
 // only when its state is KNOWN and not whitelisted — most genuine leads come back with
 // a NULL state, and a country-only "US"/"USA" is still unknown, so BOTH are kept
 // (never block on a guess).
-const TARGET_STATE = /new jersey|new york|pennsylvania|connecticut|florida|texas|california|arizona|georgia|north carolina|tennessee|colorado|nevada|utah|^\s*(nj|ny|pa|ct|fl|tx|ca|az|ga|nc|tn|co|nv|ut)\.?\s*$/i;
+const TARGET_STATE = /new jersey|new york|pennsylvania|connecticut|florida|texas|california|arizona|georgia|north carolina|tennessee|colorado|nevada|utah|illinois|massachusetts|(?<!west )virginia|maryland|washington|ohio|michigan|minnesota|indiana|wisconsin|missouri|south carolina|oregon|idaho|^\s*(nj|ny|pa|ct|fl|tx|ca|az|ga|nc|tn|co|nv|ut|il|ma|va|md|wa|oh|mi|mn|in|wi|mo|sc|or|id)\.?\s*$/i;
 const COUNTRY_ONLY = /^(us|u\.?\s?s\.?\s?a?\.?|united states)$/i;
-function isOffGeo(state) {
+export function isOffGeo(state) {
   const s = String(state || "").trim();
   if (!s || COUNTRY_ONLY.test(s) || TARGET_STATE.test(s)) return false;
   return true; // any other named state/country → outside New Jersey
@@ -514,14 +782,7 @@ export function ingestLeads(items, source) {
     if (isOffNiche(category)) continue; // off-niche → never enters the pipeline
     if (isOffGeo(it.state || it.countryCode)) continue; // outside NJ → never enters the pipeline
     const website = it.website || it.url || null;
-    let domain = null;
-    if (website) {
-      try {
-        domain = new URL(website.startsWith("http") ? website : `https://${website}`).hostname.replace(/^www\./, "");
-      } catch {
-        /* unparsable site */
-      }
-    }
+    const domain = domainFromWebsite(website);
     // DEDUP: same real domain = same business; otherwise fall back to the name.
     const rd = realDomain(domain);
     const nameKey = normName(name);
@@ -538,7 +799,7 @@ export function ingestLeads(items, source) {
       it.reviewsCount ?? it.review_count ?? null,
       website,
       it.email || null,
-      it.email ? "unknown" : null,
+      null, // pending verification either way ('unknown' is a DEAD marker — it would hide a scraped email from the pool)
       source,
       it.city || null,
       it.state || it.countryCode || null
@@ -571,9 +832,12 @@ export function fillTemplate(tpl, lead, senderName = "Ted") {
   const tidyName = (raw) => {
     let n = String(raw || "");
     n = n.split(/\s+[-–—|/]\s+/)[0]; // dash/pipe/slash tagline
-    n = n.split(/:\s*/)[0]; // "House of Ness: Ness Medical" → "House of Ness"
+    n = n.split(/:\s+/)[0]; // "House of Ness: Ness Medical" → "House of Ness"
+    // \s+ not \s*: a colon with NO space is part of the name ("Re:nu 180 Medspa"
+    // was being cut to "Re"), while a subtitle colon always has a space after it.
     n = n.split(/,\s*/)[0]; // comma location list
     n = n.split(/\s+at\s+[A-Z]/)[0]; // " at Clifton" location tag
+    n = n.split(/\s*\(/)[0]; // "(Formerly Banasiak & Nettune…)" parenthetical
     n = n.replace(/[\s,]+(LLC|L\.L\.C\.|Inc\.?|Incorporated|Co\.?|Corp\.?|Ltd\.?|PLLC|P\.?C\.?|LLP|MD)\b\.?$/i, "");
     n = n.replace(/[\s,]+(NJ|NY|PA|CT|New Jersey|New York)\b\.?$/i, ""); // trailing state tag
     n = n.replace(/[\s,]+(LLC|Inc\.?|Co\.?|Corp\.?|Ltd\.?|PLLC|P\.?C\.?|LLP|MD)\b\.?$/i, ""); // suffix before state
@@ -584,22 +848,41 @@ export function fillTemplate(tpl, lead, senderName = "Ted") {
       for (const w of n.split(/\s+/)) { if ((acc + " " + w).trim().length > 40) break; acc = (acc + " " + w).trim(); }
       n = acc || n.slice(0, 40).trim();
     }
+    // Both the state-strip above and the 40-char cap can leave a trailing
+    // connector: "Aesthetic Center of New Jersey" → "Aesthetic Center of", and
+    // "True Bliss Medical Aesthetics and Wellness" → "…Aesthetics and". Sent as-is
+    // that reads "how the math works for Aesthetic Center of?" — 25 live leads hit
+    // this. Peel connectors until the name ends on a real word.
+    let prev;
+    do {
+      prev = n;
+      n = n.replace(/[\s,]+(of|and|the|at|for|in|with|to|by|&)\.?$/i, "").trim();
+    } while (n !== prev);
     return n.trim();
   };
 
   // social proof: only cite numbers when we actually have them, otherwise use a
   // clean non-numeric line — never "great stars across many reviews".
-  const hasStats = lead.rating != null && lead.review_count != null;
+  // Only cite numbers when they actually flatter. "5 stars across 4 reviews" reads
+  // worse than saying nothing, so a thin review count falls back to the
+  // non-numeric line. 19 dental leads currently sit under this bar.
+  const hasStats = lead.rating != null && lead.review_count != null && Number(lead.review_count) >= 10;
+  // Reads as a clause after the business name: "saw {business_name} {social_proof}."
+  // The city is appended only when we actually have one, and the whole thing falls
+  // back to a stats-free line for the ~1.4% of leads with no rating/review data —
+  // otherwise those sends read "has  stars across  reviews", which is worse than
+  // no personalisation at all. No em dashes: they read as an AI tell.
+  const inCity = lead.city && String(lead.city).trim() ? ` in ${String(lead.city).trim()}` : "";
   const socialProof = hasStats
     ? pick([
-        `${lead.rating} stars across ${lead.review_count} reviews is no joke`,
-        `${lead.rating} stars across ${lead.review_count} reviews tells me your clients love you`,
-        `those ${lead.rating} stars across ${lead.review_count} reviews say a lot`,
+        `has ${lead.rating} stars across ${lead.review_count} reviews${inCity}, clearly the team is busy`,
+        `is sitting on ${lead.rating} stars across ${lead.review_count} reviews${inCity}, the team is clearly busy`,
+        `has ${lead.rating} stars from ${lead.review_count} reviews${inCity}, clearly keeping people happy`,
       ])
     : pick([
-        "your reviews say a lot about how you treat people",
-        "your reputation online clearly speaks for itself",
-        "people clearly love what you do",
+        `is clearly keeping the team busy${inCity}`,
+        `has a reputation${inCity} that speaks for itself`,
+        `is clearly doing something right${inCity}`,
       ]);
 
   let out = String(tpl)
@@ -622,6 +905,14 @@ export function fillTemplate(tpl, lead, senderName = "Ted") {
 
 // who the email is signed as — the sending inbox's persona (April, Brandon, …),
 // falling back to a capitalized local-part so it always matches the From name.
+// Optional per-batch subject/body (NULL = use the global settings templates).
+// One indexed primary-key read per lead — no cache, so a template edited mid-run
+// takes effect on the very next send instead of being served stale.
+export function batchTemplates(batchId) {
+  if (!batchId) return { subject: null, body: null };
+  const b = db.prepare("SELECT template_subject subject, template_body body FROM lead_batches WHERE id=?").get(batchId) || {};
+  return { subject: b.subject || null, body: b.body || null };
+}
 export function senderNameFor(inbox) {
   const n = smtpFirstName(inbox);
   if (n) return n;
@@ -670,21 +961,59 @@ function withCompliance(body) {
   return footer ? `${body}\n\n${footer}` : body;
 }
 
-// Platforms / aggregators / free mailboxes. When a scraped "website" is really a
-// Google Maps link, a Linktree, or a booking tool, AnyMailFinder resolves it to
-// that PLATFORM's owner (e.g. sundar@google.com) and marks it "valid". Those are
-// never the business owner — block them so we never email Sundar Pichai.
-const BLOCKED_EMAIL_DOMAINS = new Set([
+// Platforms / aggregators. When a scraped "website" is really a Google Maps link,
+// a Linktree, or a booking tool, AnyMailFinder resolves it to that PLATFORM's owner
+// (e.g. sundar@google.com) and marks it "valid". Those are never the business
+// owner — block them so we never email Sundar Pichai.
+const PLATFORM_EMAIL_DOMAINS = new Set([
   "google.com", "googlemail.com", "linktr.ee", "glossgenius.com", "booksy.com",
   "vagaro.com", "fresha.com", "squareup.com", "square.site", "zoca.com",
   "instagram.com", "facebook.com", "fb.com", "yelp.com", "wixsite.com",
   "wix.com", "godaddy.com", "weebly.com", "wordpress.com", "blogspot.com",
-  "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com",
   "union.edu",
 ]);
-function blockedEmailDomain(email) {
+// Consumer free-mail. An AnyMailFinder *find* that lands on gmail.com is a guess at
+// some random mailbox, not the owner → blocked. But an address Ted SUPPLIED in a
+// lead file (supplied_email=1) is a real contact who happens to use Gmail → allowed,
+// still verified before sending. blockedEmailDomain(email, {allowFreeMail}) picks.
+const FREE_MAIL_DOMAINS = new Set([
+  "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com",
+  "me.com", "live.com", "msn.com", "ymail.com", "protonmail.com", "proton.me",
+]);
+// union — used for dedupe keys (isSharedDomain), where both sets are "not a business domain"
+const BLOCKED_EMAIL_DOMAINS = new Set([...PLATFORM_EMAIL_DOMAINS, ...FREE_MAIL_DOMAINS]);
+// ── final pre-send deliverability gate ──────────────────────────────────────
+// AnyMailFinder validated the address when it was found, but that can be days or
+// weeks stale: domains lapse, get parked, or drop their mail service. A domain with
+// NO MX records cannot accept mail from anyone, so sending is a guaranteed bounce.
+// One DNS lookup, cached per run, catches that.
+//
+// Fails OPEN on purpose. A DNS timeout is not evidence the domain is dead, and
+// treating a transient failure as a verdict is exactly the bug that killed 232 leads
+// on 2026-08-26. We only skip on a definitive "this domain has no mail exchanger".
+const mxCache = new Map();
+export async function domainAcceptsMail(email) {
+  const domain = String(email || "").split("@")[1]?.toLowerCase();
+  if (!domain) return { ok: false, reason: "no domain" };
+  if (mxCache.has(domain)) return mxCache.get(domain);
+  let verdict = { ok: true, reason: "" };
+  try {
+    const records = await dns.resolveMx(domain);
+    if (!records || records.length === 0) verdict = { ok: false, reason: "no MX records" };
+  } catch (e) {
+    // NXDOMAIN / NODATA are definitive: nothing can receive mail there.
+    if (e.code === "ENOTFOUND" || e.code === "ENODATA") verdict = { ok: false, reason: e.code === "ENOTFOUND" ? "domain does not resolve" : "no MX records" };
+    // anything else (timeout, SERVFAIL, no network) → fail open, send anyway
+  }
+  mxCache.set(domain, verdict);
+  return verdict;
+}
+
+export function blockedEmailDomain(email, { allowFreeMail = false } = {}) {
   const dom = String(email || "").split("@")[1]?.toLowerCase().trim();
-  return Boolean(dom) && BLOCKED_EMAIL_DOMAINS.has(dom);
+  if (!dom) return false;
+  if (PLATFORM_EMAIL_DOMAINS.has(dom)) return true;
+  return !allowFreeMail && FREE_MAIL_DOMAINS.has(dom);
 }
 
 // ── Deduplication ────────────────────────────────────────────────────────────
@@ -698,7 +1027,7 @@ const SHARED_SITE_DOMAINS = new Set([
   "godaddysites.com", "weebly.com", "wordpress.com", "blogspot.com",
   "beacons.ai", "mystrikingly.com", "g.page", "page.link",
 ]);
-function isSharedDomain(domain) {
+export function isSharedDomain(domain) {
   const d = String(domain || "").toLowerCase().trim();
   if (!d) return false;
   if (BLOCKED_EMAIL_DOMAINS.has(d) || SHARED_SITE_DOMAINS.has(d)) return true;
@@ -706,15 +1035,25 @@ function isSharedDomain(domain) {
   for (const s of SHARED_SITE_DOMAINS) if (d.endsWith("." + s)) return true;   // myspa.wixsite.com
   return false;
 }
-const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
-const realDomain = (domain) => (domain && !isSharedDomain(domain) ? String(domain).toLowerCase() : null);
+export const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+export const realDomain = (domain) => (domain && !isSharedDomain(domain) ? String(domain).toLowerCase() : null);
+// "https://www.Smile-Dental.com/about" → "smile-dental.com"; bare "smile-dental.com" works too
+export function domainFromWebsite(website) {
+  if (!website) return null;
+  try {
+    const w = String(website).trim();
+    return new URL(w.startsWith("http") ? w : `https://${w}`).hostname.replace(/^www\./, "").toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
 
 // Has this email already been engaged through a DIFFERENT lead row? Covers
 // multi-location chains (one owner email, many branches), re-scrapes, alias rows,
 // and manual imports — anything we've emailed, that replied, bounced, or opted out.
 // This is the bulletproof guarantee: even a duplicate that slips past ingest dedup
 // can never be emailed a second time.
-function emailContactedElsewhere(email, exceptId) {
+export function emailContactedElsewhere(email, exceptId) {
   if (!email) return false;
   return Boolean(
     db
@@ -835,7 +1174,8 @@ async function sendBatch(runId, leadIds, { quiet = false } = {}) {
       log(`Skipping ${lead.business_name} — that address opted out before.`, "info");
       continue;
     }
-    if (blockedEmailDomain(lead.email)) {
+    // A SUPPLIED address may be free-mail (a real owner on Gmail); a FOUND one may not.
+    if (blockedEmailDomain(lead.email, { allowFreeMail: Boolean(lead.supplied_email) })) {
       // platform/aggregator address slipped through — never email it; drop from pool
       db.prepare("UPDATE leads SET status='skipped', email_status='platform', followup_due_at=NULL WHERE id=?").run(id);
       log(`Skipping ${lead.business_name} — ${lead.email} is a platform address, not the owner.`, "warn");
@@ -847,6 +1187,14 @@ async function sendBatch(runId, leadIds, { quiet = false } = {}) {
     if (emailContactedElsewhere(lead.email, id) || alreadyEmailedAddress(lead.email)) {
       db.prepare("UPDATE leads SET status='skipped', email_status='dup_recipient', followup_due_at=NULL WHERE id=?").run(id);
       log(`Skipping ${lead.business_name} — ${lead.email} was already contacted (same owner / another location). Never emailing the same person twice.`, "info");
+      continue;
+    }
+    // last gate before the send: can this domain receive mail AT ALL, right now?
+    const mx = await domainAcceptsMail(lead.email);
+    if (!mx.ok) {
+      db.prepare("UPDATE leads SET status='skipped', email_status='undeliverable', followup_due_at=NULL WHERE id=?").run(id);
+      suppress(lead.email);
+      log(`Skipping ${lead.business_name} — ${lead.email} cannot receive mail (${mx.reason}). Suppressed before sending, so it never becomes a bounce.`, "warn");
       continue;
     }
     // overall daily ceiling reached (initials + follow-ups) — stop the batch
@@ -877,8 +1225,11 @@ async function sendBatch(runId, leadIds, { quiet = false } = {}) {
     }
 
     const sender = senderNameFor(inbox);
-    const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + fillTemplate(subjectTpl, lead, sender);
-    const body = withCompliance(fillTemplate(bodyTpl, lead, sender));
+    // per-batch copy override (a fed batch may be a different niche than settings.niche);
+    // the compliance footer and the CAN-SPAM gate above wrap it exactly the same way
+    const tpl = batchTemplates(lead.batch_id);
+    const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + fillTemplate(tpl.subject || subjectTpl, lead, sender);
+    const body = withCompliance(fillTemplate(tpl.body || bodyTpl, lead, sender));
     const to = testMode ? testRecipient : lead.email;
     // ATOMIC CLAIM before the send (same belt the follow-up loop wears): only one
     // process can flip scraped→sending, and a crash after SMTP-accept defaults to
@@ -892,10 +1243,16 @@ async function sendBatch(runId, leadIds, { quiet = false } = {}) {
       }
     }
     try {
-      await pacedSendVia({ from: inbox, to, subject, body });
+      // NOT `sent` — that shadows the outer batch counter and makes `sent++` below
+      // throw "Assignment to constant variable" on every send.
+      const res = await pacedSendVia({ from: inbox, to, subject, body });
+      // Keep the Message-ID: the follow-up threads onto it via In-Reply-To. Without
+      // it the follow-up arrives as a brand-new email wearing a "Re:", which is a
+      // loud automation tell. Column is gmail_id for historical reasons; it holds
+      // the SMTP Message-ID for Zapmail inboxes.
       db.prepare(
-        "INSERT INTO emails (lead_id, inbox, direction, subject, body, kind, sent_at) VALUES (?, ?, 'out', ?, ?, 'initial', datetime('now'))"
-      ).run(id, inbox, subject, body);
+        "INSERT INTO emails (lead_id, inbox, direction, subject, body, kind, sent_at, gmail_id) VALUES (?, ?, 'out', ?, ?, 'initial', datetime('now'), ?)"
+      ).run(id, inbox, subject, body, res?.id || null);
       // TEST MODE never mutates real lead state: no status flip, no follow-up schedule.
       // (Before this, test sends permanently burned leads and later fired LIVE follow-ups.)
       if (!testMode) {
@@ -926,7 +1283,7 @@ function etNow(d = new Date()) {
   const days = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   return { day: days[p.weekday], hour: Number(p.hour), minute: Number(p.minute) };
 }
-const etDate = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d); // YYYY-MM-DD
+export const etDate = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d); // YYYY-MM-DD
 
 // business hours: Mon–Fri 8:00–17:00 Eastern
 export function withinSendWindow(d = new Date()) {
@@ -935,6 +1292,89 @@ export function withinSendWindow(d = new Date()) {
 }
 
 // ── daily auto-run: weekday mornings, once per day ──────────────────────────
+// ── Verify-ahead loop ────────────────────────────────────────────────────────
+// Keeps `verify_ahead_days × daily_target` leads verified and ready so the 8 AM run
+// never waits on AnyMailFinder, and so the runway number means something the day
+// BEFORE it matters. Same gates as the scheduler (dormant cloud never spends, only
+// the send owner verifies), plus: not while a run's producer is working the same
+// rows, and never past today's credit budget.
+let _verifyAheadBusy = false;
+let _verifyPausedUntil = 0; // after a 402 (out of credits) sleep until the next ET day
+export async function verifyAheadTick({ force = false, log = defaultVerifyLog } = {}) {
+  if (process.env.SEND_DISABLED === "1") return { skipped: "send_disabled" };
+  if (!iOwnSendLock()) return { skipped: "not_owner" };
+  if (!force && getSetting("verify_ahead_enabled") !== "1") return { skipped: "disabled" };
+  if (getSetting("paused") === "1") return { skipped: "paused" };
+  if (runningRunId()) return { skipped: "run_in_progress" };
+  if (_verifyAheadBusy) return { skipped: "busy" };
+  if (Date.now() < _verifyPausedUntil) return { skipped: "no_credits_today" };
+  if (!amfConfigured()) return { skipped: "no_key" };
+
+  const budget = Number(getSetting("verify_daily_budget_credits") || 200);
+  const want = Math.max(1, Number(getSetting("verify_ahead_days") || 2)) * Number(getSetting("daily_target") || 100);
+  // Hard ceiling on calls per tick, independent of the credit budget. A repeat verify
+  // and a not-found find are both billed ZERO, so the budget alone cannot bound a tick
+  // — without this, one pass could churn a 5,000-row batch in a single unattended go.
+  const maxCalls = Math.max(1, Number(getSetting("verify_max_per_tick") || 60));
+  const GAP_MS = 400; // pace the provider; being rate-limited is what kills leads
+  _verifyAheadBusy = true;
+  const out = { verified: 0, ready: 0, dead: 0, errors: 0, credits0: verifyCreditsToday(), stopped: "" };
+  try {
+    let consecutiveErrors = 0;
+    let calls = 0;
+    while (true) {
+      const { ready, pending } = queueCounts();
+      if (ready >= want) { out.stopped = "enough_ready"; break; }
+      if (!pending) { out.stopped = "nothing_pending"; break; }
+      if (verifyCreditsToday() >= budget) { out.stopped = "budget"; break; }
+      if (calls >= maxCalls) { out.stopped = "tick_cap"; break; }
+      const ids = queuePick(20, { pendingOnly: true });
+      if (!ids.length) { out.stopped = "nothing_pending"; break; }
+      for (const id of ids) {
+        if (verifyCreditsToday() >= budget) { out.stopped = "budget"; break; }
+        if (calls >= maxCalls) { out.stopped = "tick_cap"; break; }
+        // The morning run may have started since this tick began. Yield to it rather
+        // than verifying the same rows twice and paying twice.
+        if (runningRunId()) { out.stopped = "run_started"; break; }
+        if (calls) await sleep(GAP_MS);
+        calls++;
+        const v = await verifyLead(id, log);
+        if (v === "stop") {
+          // provider says no credits: back off 6h (matches the credit-alert debounce)
+          // so a top-up mid-day resumes without waiting for tomorrow. alertCreditOut already pinged.
+          _verifyPausedUntil = Date.now() + 6 * 60 * 60 * 1000;
+          out.stopped = "no_credits";
+          break;
+        }
+        if (v === "error") {
+          out.errors++;
+          if (++consecutiveErrors >= 5) { out.stopped = "provider_unreachable"; break; }
+          continue;
+        }
+        consecutiveErrors = 0;
+        settleVerify(id, v);
+        out.verified++;
+        if (v) out.ready++; else out.dead++;
+      }
+      if (out.stopped) break;
+    }
+  } finally {
+    _verifyAheadBusy = false;
+  }
+  const spent = Number((verifyCreditsToday() - out.credits0).toFixed(2));
+  if (out.verified || out.errors) {
+    const q = queueCounts();
+    const why = { budget: `hit today's ${budget}-credit budget`, tick_cap: `hit the ${maxCalls}-lookup cap for one pass, continuing next tick`, run_started: "the morning run took over", no_credits: "provider is out of credits", provider_unreachable: "provider unreachable, will retry", enough_ready: "enough ready for now", nothing_pending: "queue fully verified" }[out.stopped] || "";
+    log("verify", `Verified ahead: ${out.ready} ready, ${out.dead} dead, ${out.errors} retry later (${spent} credits). Queue now ${q.ready} ready / ${q.pending} pending${why ? ` — ${why}` : ""}.`, out.ready ? "success" : "info");
+  }
+  return { ...out, spent };
+}
+export function startVerifyAheadLoop() {
+  const tick = () => verifyAheadTick().catch((e) => logEvent({ actor: "verify", message: `Verify-ahead loop hit a problem: ${e.message}`, level: "error" }));
+  setTimeout(tick, 90 * 1000); // let the server settle first
+  setInterval(tick, 5 * 60 * 1000);
+}
+
 export function startScheduler() {
   setInterval(() => {
     try {
@@ -1024,13 +1464,32 @@ export function startFollowupLoop() {
           .run(lead.id).changes === 1;
       if (!claimed) continue;
       const sender = senderNameFor(inbox);
-      const subject = (testMode ? `[TEST → ${lead.email}] ` : "") + `Re: ` + fillTemplate(getSetting("email_subject"), lead, sender);
+      // Thread onto the ORIGINAL email rather than re-spinning the subject template.
+      // Re-spinning sent "Re: <a subject the prospect never received>" on 69% of
+      // follow-ups (774 of 1120) because email_subject is spintax. Reuse what was
+      // actually sent, and pass its Message-ID so Gmail groups the two messages.
+      const orig = db
+        .prepare("SELECT subject, gmail_id FROM emails WHERE lead_id=? AND direction='out' AND kind='initial' ORDER BY id DESC LIMIT 1")
+        .get(lead.id);
+      const baseSubject = String(orig?.subject || fillTemplate(getSetting("email_subject"), lead, sender))
+        .replace(/^\[TEST → [^\]]*\]\s*/, ""); // never inherit a test prefix into a live send
+      const subject =
+        (testMode ? `[TEST → ${lead.email}] ` : "") + (/^re:\s/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`);
       const body = withCompliance(fillTemplate(tpl, lead, sender));
       try {
-        await pacedSendVia({ from: inbox, to: testMode ? testRecipient : lead.email, subject, body });
+        const sent = await pacedSendVia({
+          from: inbox,
+          to: testMode ? testRecipient : lead.email,
+          subject,
+          body,
+          // Only a real RFC Message-ID ("<...@host>") is a valid In-Reply-To. The
+          // Gmail-API transport returns a hex message id instead, which would emit a
+          // malformed header if send_transport ever flips off "smtp".
+          inReplyTo: /^<.+@.+>$/.test(String(orig?.gmail_id || "")) ? orig.gmail_id : null,
+        });
         db.prepare(
-          "INSERT INTO emails (lead_id, inbox, direction, subject, body, kind, sent_at) VALUES (?, ?, 'out', ?, ?, 'followup', datetime('now'))"
-        ).run(lead.id, inbox, subject, body);
+          "INSERT INTO emails (lead_id, inbox, direction, subject, body, kind, sent_at, gmail_id) VALUES (?, ?, 'out', ?, ?, 'followup', datetime('now'), ?)"
+        ).run(lead.id, inbox, subject, body, sent?.id || null);
         logEvent({ actor: "send", message: `Gentle follow-up sent to ${lead.business_name}${testMode ? " (test copy to you)" : ""}.`, level: "success" });
       } catch (e) {
         // send failed AFTER we claimed — release the claim. Transient NETWORK failures

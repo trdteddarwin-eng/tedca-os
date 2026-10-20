@@ -9,13 +9,16 @@ type Stats = {
   replies: number;
   cost_month: number;
   running: { id: number; agent: string; status: string; started_at: string }[];
+  queue?: { ready: number; pending: number; days: number; perDay: number };
 };
 
-function Kpi({ label, value }: { label: string; value: string | number }) {
+function Kpi({ label, value, sub, tone = "" }: { label: string; value: string | number; sub?: string; tone?: string }) {
+  const color = tone === "bad" ? "text-rose-400" : tone === "warn" ? "text-amber-400" : tone === "ok" ? "text-emerald-400" : "";
   return (
     <div className="bg-panel border border-edge rounded-lg p-5">
       <p className="font-mono text-[11px] uppercase tracking-widest text-paper/50">{label}</p>
-      <p className="font-display text-4xl mt-2">{value}</p>
+      <p className={`font-display text-4xl mt-2 ${color}`}>{value}</p>
+      {sub && <p className="font-mono text-[10px] text-paper/40 mt-1">{sub}</p>}
     </div>
   );
 }
@@ -170,7 +173,13 @@ export default function Home() {
 
       <RunPanel />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-8">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mt-8">
+        <Kpi
+          label="Queue runway"
+          value={stats?.queue ? `${stats.queue.days}d` : "—"}
+          sub={stats?.queue ? `${stats.queue.ready} ready · ${stats.queue.pending} verifying` : undefined}
+          tone={!stats?.queue ? "" : stats.queue.days < 1 ? "bad" : stats.queue.days < 3 ? "warn" : "ok"}
+        />
         <Kpi label="Leads" value={stats?.leads ?? "—"} />
         <Kpi label="Emails sent" value={stats?.emails_sent ?? "—"} />
         <Kpi label="Replies" value={stats?.replies ?? "—"} />

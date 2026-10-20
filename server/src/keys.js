@@ -24,6 +24,9 @@ export const SERVICES = {
   // graph.facebook.com (Page token). They cannot share a token.
   fb_page: { env: "FB_PAGE_ACCESS_TOKEN", label: "Facebook Page (metrics)", credit_api: false },
   ig_graph: { env: "IG_PAGE_ACCESS_TOKEN", label: "Instagram (metrics)", credit_api: false },
+  // Curiosity Hook (YouTube Shorts + its own FB Page) posts through Upload-Post,
+  // and its post-analytics endpoint is where those numbers are read back.
+  upload_post: { env: "UPLOAD_POST_API_KEY", label: "Upload-Post (Curiosity Hook stats)", credit_api: false },
   // Site Stats reads traffic back out of PostHog. This is the PERSONAL api key
   // (phx_...), not the phc_ project token embedded in the site: that one is
   // write-only by design because it ships in public HTML and cannot read.

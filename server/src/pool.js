@@ -2,7 +2,12 @@
 // (app passwords) so the engine sends through whichever transport an inbox uses.
 // Sending only — reply reading stays per-transport (Gmail API vs IMAP).
 import { authorizedInboxes as gmailAuthorized, sendEmail } from "./gmail.js";
-import { smtpInboxes, isSmtpInbox, sendEmailSMTP } from "./smtp.js";
+import { smtpInboxes, isSmtpInbox, sendEmailSMTP, htmlBody } from "./smtp.js";
+import { db } from "./db.js";
+
+const getSetting = (k) => db.prepare("SELECT value FROM settings WHERE key=?").get(k)?.value || "";
+const htmlEmailsOn = () => getSetting("html_emails") === "1";
+const buildHtml = (body) => htmlBody(body, getSetting("compliance_footer"));
 
 // every inbox the engine may send from right now, tagged by transport
 export function sendingInboxes() {
@@ -27,6 +32,12 @@ export async function sendVia({ from, to, subject, body, inReplyTo = null, attac
   if (process.env.SEND_DISABLED === "1") {
     throw new Error("SEND_DISABLED: outbound sending is turned off on this instance");
   }
-  if (isSmtpInbox(from)) return sendEmailSMTP({ from, to, subject, body, inReplyTo, attachments });
+  // settings.html_emails = "1" renders a multipart message whose compliance footer
+  // is styled small and grey. OFF by default: plain text is a deliberate
+  // deliverability choice here, not an oversight. See htmlBody() in smtp.js.
+  if (isSmtpInbox(from)) {
+    const html = htmlEmailsOn() ? buildHtml(body) : null;
+    return sendEmailSMTP({ from, to, subject, body, inReplyTo, attachments, html });
+  }
   return sendEmail({ from, to, subject, body, inReplyTo, attachments });
 }

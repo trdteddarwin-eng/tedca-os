@@ -49,9 +49,13 @@ export async function generateLinkedInMessage(lead) {
 export function startLinkedInLoop() {
   setInterval(async () => {
     try {
+      // Contacted leads only. (Before the lead queue existed this keyed off
+      // email_status='valid', which was fine when leads were verified the same
+      // morning they were emailed. Verify-ahead now fills that pool DAYS early,
+      // so the old query would draft for hundreds of leads that never get a send.)
       const due = db
         .prepare(
-          "SELECT * FROM leads WHERE linkedin_url IS NOT NULL AND linkedin_url!='' AND (linkedin_message IS NULL OR linkedin_message='') AND email_status='valid' ORDER BY last_touch_at DESC LIMIT 4"
+          "SELECT * FROM leads WHERE linkedin_url IS NOT NULL AND linkedin_url!='' AND (linkedin_message IS NULL OR linkedin_message='') AND status IN ('emailed','followup_sent','replied') ORDER BY last_touch_at DESC LIMIT 4"
         )
         .all();
       for (const lead of due) {

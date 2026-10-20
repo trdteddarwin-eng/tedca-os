@@ -14,6 +14,8 @@ function toastFor(e: any): { title: string; body: string; tone: string } | null 
     return { title: "🎉 New reply", body: msg, tone: "hot" };
   if (actor === "reply" && (e.level === "warn" || /flagged|bounce|opted out/i.test(msg)))
     return { title: "⚠️ Needs you", body: msg, tone: "warn" };
+  if (actor === "intake" && e.level === "success") return { title: "🥣 Leads imported", body: msg, tone: "ok" };
+  if (actor === "intake" && e.level === "warn") return { title: "⚠️ Queue running low", body: msg, tone: "warn" };
   return null;
 }
 

@@ -6,7 +6,19 @@ import { db } from "./db.js";
 import { gmailConfigured, authorizedInboxes, startAuth, sendEmail, importTokens } from "./gmail.js";
 import { smtpInboxMeta, importSmtpInboxes } from "./smtp.js";
 import { sendingInboxes, sendVia } from "./pool.js";
-import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, startDailyReportLoop, startOwnerHeartbeat, startBounceGuard, getSetting, fillTemplate, senderNameFor } from "./engine.js";
+import { startMorningRun, runningRunId, bindLogger, startFollowupLoop, startScheduler, startDailyReportLoop, startOwnerHeartbeat, startBounceGuard, getSetting, fillTemplate, senderNameFor, startVerifyAheadLoop, verifyAheadTick, queueRunway, queueCounts, verifyCreditsToday } from "./engine.js";
+import {
+  bindIntakeLogger,
+  parseUpload as intakeParseUpload,
+  parseText as intakeParseText,
+  readSheet as intakeReadSheet,
+  preview as intakePreview,
+  remap as intakeRemap,
+  commit as intakeCommit,
+  listBatches,
+  getBatch,
+  updateBatch,
+} from "./intake.js";
 import { startReplyLoop, bindReplyLogger } from "./replies.js";
 import { startLinkedInLoop, bindLinkedInLogger, generateLinkedInMessage } from "./linkedin.js";
 import { telegramConfigured, sendTelegramFile, sendTelegram } from "./telegram.js";
@@ -14,6 +26,7 @@ import { elevenConfigured, generateVoice } from "./elevenlabs.js";
 import { manychatConfigured, listKeywords, upsertKeyword, deleteKeyword, recentActivity, findDuplicateWarnings, botHealth , markTokenRefreshed } from "./igkeywords.js";
 import { runCrmBackup, startCrmBackupLoop, bindBackupLogger } from "./crmbackup.js";
 import { refreshContent, contentStatus, startContentLoop, bindContentLogger } from "./content.js";
+import { getUpcoming, resolveUpcomingFile, materializeBlob, sendDayRequest } from "./upcoming.js";
 import { SERVICES, bindKeysLogger, setKeys, maskedInfo, fetchCredits } from "./keys.js";
 import { siteStats, SITES } from "./sitestats.js";
 import {
@@ -169,6 +182,7 @@ app.get("/api/digest", requireUser, (req, res) => {
     interested: db.prepare("SELECT COUNT(*) c FROM leads WHERE status='replied'").get().c,
     bouncesSince: since1("SELECT COUNT(*) c FROM leads WHERE status='bounced' AND last_touch_at>=?"),
     bankedReady: db.prepare("SELECT COUNT(*) c FROM leads WHERE status='scraped' AND email_status='valid' AND email IS NOT NULL").get().c,
+    queue: queueRunway(),
     lastRun: db.prepare("SELECT summary, status, finished_at FROM runs ORDER BY id DESC LIMIT 1").get() || null,
   });
 });
@@ -302,6 +316,8 @@ app.get("/api/stats", requireUser, (req, res) => {
     replies: db.prepare("SELECT COUNT(*) c FROM emails WHERE direction='in'").get().c,
     cost_month: db.prepare("SELECT COALESCE(SUM(amount_usd),0) s FROM costs WHERE ts >= ?").get(monthIso).s,
     running: db.prepare("SELECT * FROM runs WHERE status IN ('running','paused') ORDER BY id DESC").all(),
+    queue: queueRunway(),
+    verify_credits_today: verifyCreditsToday(),
   });
 });
 
@@ -309,7 +325,7 @@ app.get("/api/stats", requireUser, (req, res) => {
 // reports its own ok/error, so this route only 500s if the whole thing throws.
 app.get("/api/site-stats", requireUser, async (req, res) => {
   try {
-    res.json(await siteStats(String(req.query.site || "epoxy")));
+    res.json(await siteStats(String(req.query.site || "epoxy"), String(req.query.day || "")));
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }
@@ -344,7 +360,8 @@ app.get("/api/leads", requireUser, (req, res) => {
 
 // Market rotation: which metro the engine hunts now, which are drained (read-only)
 app.get("/api/markets", requireUser, (_req, res) => {
-  res.json(db.prepare("SELECT * FROM markets ORDER BY id").all());
+  // Same order the engine rotates in, so the dashboard list reads as the real queue.
+  res.json(db.prepare("SELECT * FROM markets ORDER BY state_rank IS NULL, state_rank, priority, id").all());
 });
 
 // ── ManyChat (ig-comment-dm) keyword control panel ──────────────────────────
@@ -444,9 +461,68 @@ app.get("/api/content/:id/history", requireUser, (req, res) => {
 // Force a refresh now (shares the in-flight fetch with the 90s loop).
 app.post("/api/content/refresh", requireUser, async (_req, res) => {
   try {
-    res.json(await refreshContent());
+    res.json(await refreshContent(true));
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Upcoming: every Curiosity Hook video that WILL post (upcoming.js) ───────
+// Read-only. Upload-Post's schedule + wait-that-happened origin/main (never the
+// working tree). ?force=1 re-checks both sources now (still throttled to 20s).
+app.get("/api/upcoming", requireUser, async (req, res) => {
+  try {
+    res.json(await getUpcoming(req.query.force === "1"));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Approve / Skip / Request changes for a day waiting on Ted. Makes the exact
+// requests/<ts>-<action>.json commit the Telegram bridge makes; respond.yml does
+// the rest (and reports back on Telegram). Body: {action, feedback?}.
+app.post("/api/upcoming/:day/request", requireUser, async (req, res) => {
+  const { action, feedback } = req.body || {};
+  try {
+    const r = await sendDayRequest({ day: req.params.day, action, feedback });
+    const what = action === "feedback" ? `requested changes: "${String(feedback).slice(0, 80)}"` : action === "approve" ? "approved it" : "skipped it";
+    logEvent({ actor: "system", message: `Curiosity Hook ${req.params.day}: Ted ${what} from the Upcoming page (${r.file}).`, level: "info" });
+    res.json(r);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Stream one upcoming video/cover to <video>/<img>. Auth via ?token= (media tags
+// can't send headers), and only ids the last /api/upcoming listed are servable.
+app.get("/api/upcoming/file", async (req, res) => {
+  if (!sessionExists(String(req.query.token || ""))) return res.status(401).end();
+  let file = resolveUpcomingFile(req.query.id);
+  if (!file) return res.status(404).end();
+  try {
+    if (typeof file !== "string") file = await materializeBlob(file);
+  } catch {
+    return res.status(404).end();
+  }
+  const ext = path.extname(file).toLowerCase();
+  const types = { ".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png" };
+  res.setHeader("Content-Type", types[ext] || "application/octet-stream");
+  res.setHeader("Cache-Control", "private, max-age=600");
+  const stat = fs.statSync(file);
+  const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range || "");
+  if (m) {
+    const start = parseInt(m[1], 10);
+    const end = m[2] ? Math.min(parseInt(m[2], 10), stat.size - 1) : stat.size - 1;
+    if (start >= stat.size) return res.status(416).setHeader("Content-Range", `bytes */${stat.size}`).end();
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${stat.size}`);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Length", end - start + 1);
+    fs.createReadStream(file, { start, end }).pipe(res);
+  } else {
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Length", stat.size);
+    fs.createReadStream(file).pipe(res);
   }
 });
 
@@ -479,7 +555,7 @@ app.get("/api/pipeline", requireUser, (_req, res) => {
     followup_sent: g(st, "followup_sent"),
     replied: g(st, "replied"),
     // AnyMailFinder couldn't get a usable owner email
-    deadBreakdown: { not_found: g(es, "not_found"), platform: g(es, "platform"), unknown: g(es, "unknown"), risky: g(es, "risky") },
+    deadBreakdown: { not_found: g(es, "not_found"), platform: g(es, "platform"), unknown: g(es, "unknown"), risky: g(es, "risky"), invalid: g(es, "invalid"), undeliverable: g(es, "undeliverable") },
     // filtered out before/around verification (dupes, geo, niche, opt-outs)
     filteredBreakdown: { dup_recipient: g(es, "dup_recipient"), off_geo: g(es, "off_geo"), duplicate: g(es, "duplicate"), off_niche: g(es, "off_niche"), suppressed: g(es, "suppressed") },
     byEmailStatus: es,
@@ -664,6 +740,65 @@ app.get("/api/email-stats", requireUser, (_req, res) => {
 });
 
 // One-time data migration: local instance pushes its leads + email history up.
+// ── ESCAPE HATCH ────────────────────────────────────────────────────────────
+// Once the cloud is the source of truth there must be a way to get the data back.
+// VACUUM INTO writes a consistent snapshot even under WAL and needs no sqlite3 CLI
+// (the alpine image has none). Written inside DATA_DIR so it lands on the volume,
+// not the container's ephemeral layer, and unlinked as soon as it is streamed.
+app.get("/api/admin/export-db", requireUser, (req, res) => {
+  const dir = process.env.DATA_DIR || path.join(__dirname2, "..", "data");
+  const dest = path.join(dir, `export-${Date.now()}.db`);
+  try {
+    db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+  } catch (e) {
+    return res.status(500).json({ error: `snapshot failed: ${e.message}` });
+  }
+  res.download(dest, "tedca-os-export.db", () => {
+    try { fs.unlinkSync(dest); } catch { /* best effort */ }
+  });
+});
+
+// Tables the 30s leads/emails/runs mirror never carried. Suppressions are the one
+// that matters most: they are the ONLY permanent opt-out record, and emailing a
+// suppressed address is a compliance problem, not just a bug.
+app.post("/api/admin/import-aux", requireUser, (req, res) => {
+  const { suppressions = [], settings = [], seen_messages = [], replace_seen = false } = req.body || {};
+  const out = {};
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    if (suppressions.length) {
+      const st = db.prepare("INSERT OR IGNORE INTO suppressions (email, ts) VALUES (?, ?)");
+      let n = 0;
+      for (const r of suppressions) n += st.run(String(r.email).toLowerCase(), r.ts || null).changes;
+      out.suppressions = n;
+    }
+    if (settings.length) {
+      const st = db.prepare("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+      // never import another instance's send-lock or day-claim
+      const SKIP = new Set(["send_owner", "last_auto_run_date", "last_login_at", "prev_login_at", "crm_backup_last", "crm_backup_counts"]);
+      let n = 0;
+      for (const r of settings) { if (SKIP.has(r.key)) continue; st.run(r.key, String(r.value)); n++; }
+      out.settings = n;
+    }
+    if (seen_messages.length) {
+      // replace_seen makes the cloud's reply-dedup state EXACTLY match the Mac's.
+      // The cloud's own copy is poisoned: it recorded replies that the mirror then
+      // erased, so those messages are marked seen but their rows are gone.
+      if (replace_seen) db.exec("DELETE FROM seen_messages");
+      const st = db.prepare("INSERT OR IGNORE INTO seen_messages (id, ts) VALUES (?, ?)");
+      let n = 0;
+      for (const r of seen_messages) n += st.run(r.id, r.ts || null).changes;
+      out.seen_messages = n;
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+    return res.status(500).json({ error: e.message });
+  }
+  logEvent({ actor: "system", message: `Aux import: ${JSON.stringify(out)}`, level: "info" });
+  res.json({ ok: true, ...out });
+});
+
 app.post("/api/admin/import-data", requireUser, (req, res) => {
   const { leads = [], emails = [], runs = [], replace = false } = req.body || {};
 
@@ -849,6 +984,84 @@ app.post("/api/gmail/test-send", requireUser, async (req, res) => {
 });
 
 // ---- morning run + job queue -------------------------------------------------
+// ── LEAD INTAKE — "feed it leads, it does the rest" ─────────────────────────
+// Ted feeds a file / paste / Sheet; preview shows the column mapping, the dupes,
+// and what it will cost in AnyMailFinder credits BEFORE anything is inserted. The
+// Import click is the spend approval (workspace rule: ask before spending).
+// memoryStorage: a lead CSV is small and we never want it lingering on disk.
+const _intakeUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB is ~80k lead rows
+});
+
+app.post("/api/intake/preview", requireUser, (req, res) => {
+  _intakeUpload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    try {
+      let parsed;
+      if (req.file) parsed = intakeParseUpload(req.file.buffer, req.file.originalname);
+      else if ((req.body || {}).sheet_url) parsed = await intakeReadSheet(req.body.sheet_url);
+      else if ((req.body || {}).text) parsed = intakeParseText(req.body.text);
+      else return res.status(400).json({ error: "Send a file, a sheet_url, or pasted text." });
+      res.json(intakePreview(parsed));
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+});
+
+// Re-run the preview with Ted's corrected column mapping (no re-upload).
+app.post("/api/intake/remap", requireUser, (req, res) => {
+  const { token, mapping } = req.body || {};
+  if (!token || !mapping) return res.status(400).json({ error: "token and mapping required" });
+  try {
+    res.json(intakeRemap(token, mapping));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/intake/commit", requireUser, async (req, res) => {
+  const { token, ...opts } = req.body || {};
+  if (!token) return res.status(400).json({ error: "token required (preview first)" });
+  try {
+    res.json(await intakeCommit(token, opts));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Run one verify-ahead pass right now (the Feed page's "verify now" button, and QA).
+// Not `force`: verify_ahead_enabled stays a real kill switch. The tick is bounded by
+// verify_max_per_tick, so this returns instead of hanging the browser on a big queue.
+app.post("/api/intake/verify-now", requireUser, async (req, res) => {
+  try {
+    const out = await verifyAheadTick();
+    res.json({ ...out, queue: queueRunway() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/batches", requireUser, (req, res) => {
+  res.json({ batches: listBatches(), queue: queueRunway(), credits_today: verifyCreditsToday(), credits_budget: Number(getSetting("verify_daily_budget_credits") || 200) });
+});
+
+app.patch("/api/batches/:id", requireUser, (req, res) => {
+  try {
+    const b = updateBatch(Number(req.params.id), req.body || {});
+    res.json({ batch: b, queue: queueRunway() });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get("/api/batches/:id", requireUser, (req, res) => {
+  const b = getBatch(Number(req.params.id));
+  if (!b) return res.status(404).json({ error: "batch not found" });
+  res.json({ batch: b });
+});
+
 app.post("/api/run/morning", requireUser, async (req, res) => {
   const target = Math.max(1, Math.min(Number((req.body || {}).target || 10), 500));
   const query = (req.body || {}).query || null;
@@ -857,6 +1070,14 @@ app.post("/api/run/morning", requireUser, async (req, res) => {
     // Without await that throw becomes an unhandled rejection (Node exits by default)
     // and run_id serializes to {}. Awaiting catches it cleanly → proper 409.
     const runId = await startMorningRun({ target, query });
+    if (!runId) {
+      // stood down on purpose (empty queue / no fresh city) — say which, don't fake success
+      const q = queueCounts();
+      const reason = q.ready === 0 && q.pending === 0
+        ? "The lead queue is empty. Feed a CSV, a paste, or a Google Sheet on the Feed Leads page and run again."
+        : "Stood down for today — see the activity feed for the reason.";
+      return res.status(409).json({ error: reason, queue: queueRunway() });
+    }
     res.json({ run_id: runId });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -1735,12 +1956,14 @@ bindSkillLogger(logEvent);
 bindReplyLogger(logEvent);
 bindHotLeadsLogger(logEvent);
 bindLinkedInLogger(logEvent);
+bindIntakeLogger(logEvent);
 startOwnerHeartbeat(); // claim the single-owner send lock before any send loop starts
 startBounceGuard(); // auto-pause an inbox if its 7-day bounce rate crosses the danger line
 bindBackupLogger(logEvent);
 startCrmBackupLoop(); // CRM → Google Sheet backup every 4h + daily local .db snapshot
 startFollowupLoop();
 startScheduler();
+startVerifyAheadLoop(); // keep the queue verified ahead so the 8am run never waits on AnyMailFinder
 startReplyLoop();
 startLinkedInLoop();
 startDailyReportLoop();

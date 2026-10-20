@@ -8,3 +8,8 @@ node_modules/
 server/data/
 app/dist/
 output/
+# secret backups (.env.bak-*) and editor/agent backups never ship
+.env*
+*.env*
+*.bak*
+*.bak-*

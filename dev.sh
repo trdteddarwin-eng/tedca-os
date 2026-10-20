@@ -8,9 +8,12 @@ echo "stopping old processes…"
 lsof -ti :8790 | xargs kill -9 2>/dev/null || true
 # ALSO kill servers NOT holding the port: a watchdog respawn that lost the EADDRINUSE
 # race keeps running its send loops portless (zombie), survives the lsof kill, and can
-# squat the send-owner lock while unable to send (the Jul 6 stall). npm-spawned servers
-# have no "tedca-os" in argv, so match the script path itself.
-pgrep -f "server/src/index.js" | xargs kill -9 2>/dev/null || true
+# squat the send-owner lock while unable to send (the Jul 6 stall).
+# `npm start` runs from inside server/, so argv reads "src/index.js" — NOT
+# "server/src/index.js", which is what this matched until 2026-09-02 and is why
+# it silently never killed anything. Relative pattern matches the server and not
+# the worker (worker/index.js), which is killed on its own line below.
+pgrep -f -- "--env-file=../.env src/index.js" | xargs kill -9 2>/dev/null || true
 # pkill -f can miss processes with spaces in path; also kill by scanning pgrep output
 pgrep -f "tedca-os/worker" | xargs kill -9 2>/dev/null || true
 pgrep -f "tedca-os/app.*vite" | xargs kill -9 2>/dev/null || true

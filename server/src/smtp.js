@@ -76,8 +76,39 @@ function transporterFor(email, rec) {
   return t;
 }
 
+
+// ── optional HTML body ────────────────────────────────────────────────────
+// Off by default, and that default is deliberate. These are plain-text emails
+// because plain text reads as a person typing; a multipart/HTML cold email from
+// a young domain is filtered harder, and the copy's whole premise is that it
+// looks like a 1:1 note. Turning this on buys a smaller-looking footer and pays
+// for it in inbox placement, so it is a setting Ted flips knowingly, not a
+// default. The plain-text part is ALWAYS sent too, so a client that prefers
+// text (or strips HTML) still gets a correct, compliant email.
+//
+// The footer stays clear and conspicuous: 11px on a 13px body is the same ratio
+// every legitimate sender uses. It is de-emphasised, not concealed.
+export function htmlBody(text, footer) {
+  const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // split the compliance footer off the end so it can be styled separately
+  // Only split when the text actually ENDS with the footer (campaign sends run
+  // through withCompliance). Hot Leads manual replies do not, and appending the
+  // footer to just the HTML part would ship a footer the text part lacks.
+  const hasFooter = Boolean(footer) && text.endsWith(footer);
+  const body = hasFooter ? text.slice(0, -footer.length).trimEnd() : text;
+  return (
+    '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;' +
+    'font-size:13px;line-height:1.5;color:#222;white-space:pre-wrap">' +
+    esc(body) +
+    (hasFooter
+      ? '</div><div style="margin-top:14px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;' +
+        'font-size:11px;line-height:1.4;color:#9a9a9a">' + esc(footer) + '</div>'
+      : '</div>')
+  );
+}
+
 // Same signature as gmail.js sendEmail({ from, to, subject, body, inReplyTo }).
-export async function sendEmailSMTP({ from, to, subject, body, inReplyTo = null, attachments = [] }) {
+export async function sendEmailSMTP({ from, to, subject, body, inReplyTo = null, attachments = [], html = null }) {
   const rec = load()[String(from).toLowerCase()];
   if (!rec) throw new Error(`${from} is not a registered SMTP inbox`);
   const headers = {};
@@ -93,7 +124,8 @@ export async function sendEmailSMTP({ from, to, subject, body, inReplyTo = null,
     from: rec.firstName ? `"${rec.firstName}" <${from}>` : from,
     to,
     subject,
-    text: body,
+    text: body,          // always sent, even alongside html
+    ...(html ? { html } : {}),
     headers,
     // Hot Leads manual replies can carry files: [{ filename, path }]
     ...(attachments.length ? { attachments: attachments.map((a) => ({ filename: a.filename, path: a.path })) } : {}),

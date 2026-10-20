@@ -28,8 +28,17 @@ export async function api(path: string, options: RequestInit = {}) {
     window.location.href = "/";
     throw new Error("unauthorized");
   }
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
+  if (!res.ok) throw new Error(await errorText(res, path));
   return res.json();
+}
+
+// Servers answer errors as {error: "..."} — surface that, not a bare status code.
+async function errorText(res: Response, path: string) {
+  try {
+    const j = await res.json();
+    if (j && j.error) return String(j.error);
+  } catch { /* not JSON */ }
+  return `${path} → ${res.status}`;
 }
 
 // multipart POST (file uploads): the browser must set its own multipart boundary,
@@ -45,7 +54,7 @@ export async function apiForm(path: string, form: FormData) {
     window.location.href = "/";
     throw new Error("unauthorized");
   }
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
+  if (!res.ok) throw new Error(await errorText(res, path));
   return res.json();
 }
 

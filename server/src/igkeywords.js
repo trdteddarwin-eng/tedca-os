@@ -30,6 +30,12 @@ function loadServiceAccount() {
   return JSON.parse(fs.readFileSync(SA_PATH, "utf8"));
 }
 
+// The service account's public identity (an email address, not a secret) — shown
+// to Ted so he knows which account to share a Google Sheet with.
+export function serviceAccountEmail() {
+  try { return loadServiceAccount().client_email || ""; } catch { return ""; }
+}
+
 export function manychatConfigured() {
   return Boolean(
     (process.env.MANYCHAT_SA_JSON || "").trim() ||

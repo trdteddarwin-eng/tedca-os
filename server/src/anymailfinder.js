@@ -8,6 +8,11 @@ import { alertCreditOut } from "./credit_alerts.js";
 
 const DM_API = "https://api.anymailfinder.com/v5.1/find-email/decision-maker";
 const COMPANY_API = "https://api.anymailfinder.com/v5.1/find-email/company";
+// Verify an address we already have (a lead file that came WITH emails). Priced far
+// below a find (fractions of a credit; a repeat within 30 days is free), and it is
+// the only honest way to keep Ted's supplied address instead of swapping it for
+// whichever CEO AnyMailFinder guesses.
+const VERIFY_API = "https://api.anymailfinder.com/v5.1/verify-email";
 
 export function amfConfigured() {
   return Boolean(getKey("anymailfinder"));
@@ -53,8 +58,44 @@ function normalize(d = {}) {
     name: d.person_full_name || null,
     title: d.person_job_title || null,
     linkedin: d.person_linkedin_url || null,
+    // real spend for the daily budget meter. If the provider ever stops sending the
+    // field, assume list price on a hit rather than silently metering zero.
+    credits: (() => {
+      const c = d.credits_charged ?? d.credits_used;
+      if (c != null) return Number(c) || 0;
+      return status === "valid" && email ? 2 : 0;
+    })(),
     raw: d,
   };
+}
+
+// Verify ONE known address. Returns { ok, status: valid|invalid|risky|unknown, credits, raw }.
+// Never throws on a provider verdict; throws only on network/non-JSON so the caller
+// can treat it as transient (leave the lead untouched, retry later).
+// Only a verdict ABOUT THE ADDRESS may be recorded. Everything else must throw so
+// the caller returns "error" and leaves the lead untouched for a later retry.
+// 400/422 = "that string is not an email"; 429/408/423/425 = us, not them, and
+// stamping those permanently kills good leads (the 2026-08-26 incident, 232 dead).
+const ADDRESS_VERDICT_STATUS = new Set([400, 422]);
+export async function verifyEmail(email) {
+  if (!getKey("anymailfinder")) throw new Error("ANYMAILFINDER_API_KEY missing — set it in env or the API Keys page");
+  const r = await post(VERIFY_API, { email: String(email).trim() });
+  if (r.noCredits) return { ok: false, status: "no_credits", credits: 0 };
+  const d = r.data || {};
+  if (r.res && !r.res.ok) {
+    if (ADDRESS_VERDICT_STATUS.has(r.res.status)) return { ok: false, status: "invalid", credits: 0, raw: d };
+    // 401/403 after the fallback-key retry lands here too: an expired key must never
+    // be read as "every address in Ted's batch is dead".
+    throw new Error(`AnyMailFinder verify HTTP ${r.res.status}`);
+  }
+  const status = String(d.email_status || d.status || d.result || "unknown").toLowerCase();
+  const norm = status === "valid" || status === "deliverable" ? "valid" : status === "invalid" || status === "undeliverable" ? "invalid" : status === "risky" || status === "catch_all" || status === "catch-all" || status === "accept_all" ? "risky" : "unknown";
+  // credits_charged is real (confirmed against the live API: 0.2 a verify, 0 on a
+  // repeat inside 30 days). Fall back to the list price if it ever goes missing, so
+  // the daily budget can never silently become a no-op.
+  const charged = d.credits_charged ?? d.credits_used;
+  const credits = charged == null ? 0.2 : Number(charged) || 0;
+  return { ok: norm === "valid", status: norm, credits, raw: d };
 }
 
 // Returns { ok, email, status, name, title, linkedin, raw }.
